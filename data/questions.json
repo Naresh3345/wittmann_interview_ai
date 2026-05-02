@@ -1,0 +1,82 @@
+[
+  {
+    "id": 1,
+    "category": "Company Knowledge",
+    "difficulty": "Easy",
+    "question": "What do you know about WITTMANN BATTENFELD and its role in plastics injection molding?",
+    "keywords": ["injection molding", "automation", "robots", "peripheral equipment", "integrated production cells", "plastics"],
+    "ideal_answer": "WITTMANN BATTENFELD is known for plastics injection molding machines, automation systems, robots and peripheral equipment. The company provides integrated production cells by combining machines, robots and auxiliaries, helping manufacturers improve precision, efficiency and productivity."
+  },
+  {
+    "id": 2,
+    "category": "Industry 4.0",
+    "difficulty": "Medium",
+    "question": "How can Industry 4.0 improve an injection molding production cell at WITTMANN?",
+    "keywords": ["data collection", "MES", "ERP", "traceability", "condition monitoring", "predictive maintenance", "smart factory"],
+    "ideal_answer": "Industry 4.0 improves injection molding production by connecting machines, robots and auxiliaries with MES or ERP systems. It supports production monitoring, parameter traceability, condition monitoring, predictive maintenance and data-driven optimization for higher uptime and quality."
+  },
+  {
+    "id": 3,
+    "category": "AI Application",
+    "difficulty": "Medium",
+    "question": "Suggest one AI solution that can help WITTMANN customers reduce machine downtime.",
+    "keywords": ["predictive maintenance", "sensor data", "anomaly detection", "condition monitoring", "alerts", "machine learning"],
+    "ideal_answer": "An AI predictive maintenance system can analyze sensor data from injection molding machines, robots and auxiliaries. It can detect abnormal vibration, temperature, pressure or cycle time patterns and generate early alerts before breakdowns, reducing unplanned downtime."
+  },
+  {
+    "id": 4,
+    "category": "Data Analytics",
+    "difficulty": "Medium",
+    "question": "Which production data would you analyze to improve quality in injection molding?",
+    "keywords": ["cycle time", "temperature", "pressure", "shot weight", "mold temperature", "defect rate", "energy consumption"],
+    "ideal_answer": "I would analyze cycle time, injection pressure, melt temperature, mold temperature, cooling time, shot weight, defect rate and energy consumption. These variables can reveal process instability and help optimize quality, efficiency and repeatability."
+  },
+  {
+    "id": 5,
+    "category": "Automation",
+    "difficulty": "Easy",
+    "question": "Why are robots and automation important in plastics manufacturing?",
+    "keywords": ["repeatability", "productivity", "safety", "reduced manual work", "consistent quality", "cycle time"],
+    "ideal_answer": "Robots and automation improve repeatability, productivity and safety. They reduce manual handling, maintain consistent quality, lower cycle time variation and support efficient part removal, sorting, packaging and integrated production workflows."
+  },
+  {
+    "id": 6,
+    "category": "Energy Efficiency",
+    "difficulty": "Medium",
+    "question": "How can AI and analytics support energy-efficient injection molding?",
+    "keywords": ["energy consumption", "optimization", "cycle time", "temperature", "predictive analytics", "process parameters"],
+    "ideal_answer": "AI can analyze energy consumption together with process parameters such as temperature, pressure and cycle time. It can recommend optimized machine settings, detect inefficient operation and support energy-saving production without compromising product quality."
+  },
+  {
+    "id": 7,
+    "category": "Problem Solving",
+    "difficulty": "Hard",
+    "question": "If defect rates suddenly increase in a WITTMANN production cell, how would you investigate using data analytics?",
+    "keywords": ["root cause analysis", "trend analysis", "process parameters", "operator logs", "machine data", "correlation", "quality data"],
+    "ideal_answer": "I would compare defect trends with machine parameters, material batch details, operator logs and maintenance history. I would use correlation analysis, time-series plots and root cause analysis to identify whether pressure, temperature, cooling, material or robot handling caused the defect increase."
+  },
+  {
+    "id": 8,
+    "category": "Communication",
+    "difficulty": "Easy",
+    "question": "Explain WITTMANN 4.0 to a non-technical customer in simple words.",
+    "keywords": ["connected", "machines", "robots", "auxiliaries", "data", "monitoring", "smart factory"],
+    "ideal_answer": "WITTMANN 4.0 means connecting the molding machine, robot and auxiliary equipment so they work as one smart production cell. It helps the customer monitor production, collect useful data, improve traceability and make better decisions."
+  },
+  {
+    "id": 9,
+    "category": "Technical AI",
+    "difficulty": "Hard",
+    "question": "Which machine learning algorithm would you choose for anomaly detection in production data and why?",
+    "keywords": ["isolation forest", "autoencoder", "one-class svm", "unsupervised learning", "rare faults", "sensor data"],
+    "ideal_answer": "I would consider Isolation Forest for tabular sensor data because it works well for unsupervised anomaly detection and rare abnormal patterns. For complex time-series data, an autoencoder can learn normal machine behavior and flag high reconstruction error as anomalies."
+  },
+  {
+    "id": 10,
+    "category": "Final HR",
+    "difficulty": "Easy",
+    "question": "Why do you want to work on AI solutions for WITTMANN BATTENFELD?",
+    "keywords": ["manufacturing", "AI", "automation", "data analytics", "Industry 4.0", "innovation", "quality"],
+    "ideal_answer": "I want to work on AI solutions for WITTMANN BATTENFELD because the company combines advanced manufacturing, automation and Industry 4.0. AI and data analytics can improve quality, energy efficiency, predictive maintenance and customer value in modern plastics production."
+  }
+]
