@@ -7,7 +7,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, send_file, session
+from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from utils.report import generate_pdf_report
 from utils.scoring import feedback_from_score, score_answer
@@ -35,12 +35,32 @@ def index():
     return render_template("index.html", company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"))
 
 
+@app.route("/start-interview", methods=["POST"])
+def start_interview():
+    candidate_profile = {
+        "name": request.form.get("candidate_name", "").strip(),
+        "email": request.form.get("candidate_email", "").strip(),
+        "phone": request.form.get("candidate_phone", "").strip(),
+        "domain": request.form.get("candidate_domain", "").strip(),
+    }
+
+    if not all(candidate_profile.values()):
+        return redirect(url_for("index"))
+
+    session["candidate_profile"] = candidate_profile
+    return redirect(url_for("interview"))
+
+
 @app.route("/interview")
 def interview():
+    candidate_profile = session.get("candidate_profile")
+    if not candidate_profile:
+        return redirect(url_for("index"))
+
     questions = load_questions()
     session["interview_id"] = str(uuid.uuid4())
     session["face_stats"] = {"total_frames": 0, "detected_frames": 0, "smile_frames": 0, "stable_frames": 0}
-    return render_template("interview.html", questions=questions, company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"))
+    return render_template("interview.html", questions=questions, company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"), candidate_profile=candidate_profile)
 
 
 @app.route("/api/questions")
@@ -92,7 +112,7 @@ def analyze_frame():
 @app.route("/api/submit", methods=["POST"])
 def submit_interview():
     payload = request.get_json(force=True)
-    candidate_name = payload.get("candidate_name", "Candidate")
+    candidate_name = payload.get("candidate_name") or session.get("candidate_profile", {}).get("name") or "Candidate"
     answers = payload.get("answers", {})
     questions = load_questions()
 

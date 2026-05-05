@@ -3,6 +3,7 @@
 <main class="interview-layout">
   <aside class="camera-panel">
     <h2>Candidate Monitor</h2>
+    <p class="candidate-domain">Domain: {{ candidate_profile.get('domain', 'Not selected') }}</p>
     <video id="video" autoplay playsinline muted></video>
     <canvas id="snapshot" width="320" height="240" hidden></canvas>
     <div class="status-box">
@@ -10,7 +11,7 @@
       <small id="emotionStatus">Emotion: Waiting</small>
     </div>
     <label>Candidate Name</label>
-    <input id="candidateName" placeholder="Enter candidate name" value="Nareshkumar B" />
+    <input id="candidateName" placeholder="Enter candidate name" value="{{ candidate_profile.get('name', '') }}" />
     <button class="btn ghost full" onclick="startSpeech()">🎙️ Speak Answer</button>
     <button class="btn primary full" onclick="submitInterview()">Submit Interview</button>
   </aside>

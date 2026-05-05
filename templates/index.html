@@ -5,10 +5,33 @@
     <p class="eyebrow">Final Year AI & Data Analytics Project</p>
     <h1>AI-Based Smart Interview System for {{ company_name }}</h1>
     <p class="subtitle">A professional mock interview platform that evaluates company knowledge, Industry 4.0 thinking, AI problem solving, communication quality, and webcam-based confidence signals.</p>
-    <div class="hero-actions">
-      <a class="btn primary" href="/interview">Start Interview</a>
-      <a class="btn ghost" href="#features">View Features</a>
-    </div>
+
+    <form class="onboarding-form" action="/start-interview" method="post">
+      <h3>Step 1: Candidate Details</h3>
+      <label for="candidate_name">Name</label>
+      <input id="candidate_name" name="candidate_name" required placeholder="Enter your full name" />
+
+      <label for="candidate_email">Email ID</label>
+      <input id="candidate_email" name="candidate_email" type="email" required placeholder="Enter your email" />
+
+      <label for="candidate_phone">Phone Number</label>
+      <input id="candidate_phone" name="candidate_phone" type="tel" required placeholder="Enter your phone number" />
+
+      <h3>Step 2: Choose Domain</h3>
+      <label for="candidate_domain">Domain / Role</label>
+      <select id="candidate_domain" name="candidate_domain" required>
+        <option value="" selected disabled>Select your domain</option>
+        <option value="Manual Testing">Manual Testing</option>
+        <option value="Automation Testing">Automation Testing</option>
+        <option value="AI Tech Support">AI Tech Support</option>
+        <option value="Software Development">Software Development</option>
+      </select>
+
+      <div class="hero-actions">
+        <button class="btn primary" type="submit">Start Interview</button>
+        <a class="btn ghost" href="#features">View Features</a>
+      </div>
+    </form>
   </section>
   <section class="hero-card">
     <div class="score-ring">AI</div>
