@@ -29,7 +29,9 @@ def semantic_score(answer: str, ideal_answer: str) -> float:
         return 0.0
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), stop_words="english")
     vectors = vectorizer.fit_transform([answer, ideal_answer])
-    return float(cosine_similarity(vectors[0:1], vectors[1:2])[0][0])
+    answer_vec = vectors.getrow(0)
+    ideal_vec = vectors.getrow(1)
+    return float(cosine_similarity(answer_vec, ideal_vec)[0, 0])
 
 
 def communication_score(answer: str) -> float:

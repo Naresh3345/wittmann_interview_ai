@@ -21,8 +21,13 @@ REPORT_DIR = BASE_DIR / "reports"
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
 
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-smile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_smile.xml")
+cv2_data = getattr(cv2, "data", None)
+haar_folder = getattr(cv2_data, "haarcascades", None) if cv2_data is not None else None
+if not haar_folder:
+    haar_folder = os.path.join(os.path.dirname(cv2.__file__), "data", "haarcascades")
+
+face_cascade = cv2.CascadeClassifier(os.path.join(haar_folder, "haarcascade_frontalface_default.xml"))
+smile_cascade = cv2.CascadeClassifier(os.path.join(haar_folder, "haarcascade_smile.xml"))
 
 
 def load_questions():
@@ -113,7 +118,7 @@ def submit_interview():
         **stats,
         "confidence_index": round(((stats.get("detected_frames", 0) / total) * 55) + ((stats.get("stable_frames", 0) / total) * 30) + ((stats.get("smile_frames", 0) / total) * 15), 2)
     }
-    report_path = generate_pdf_report(candidate_name, results, face_summary, REPORT_DIR)
+    report_path = generate_pdf_report(candidate_name, results, face_summary, str(REPORT_DIR))
     session["last_report"] = report_path
 
     overall = round(sum(r["score"]["total_score"] for r in results) / max(len(results), 1), 2)
