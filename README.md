@@ -1,4 +1,4 @@
-# Whittmann AI-Based Smart Interview System
+# Wittmann AI-Based Smart Interview System
 
 A professional final-year B.Tech AI & Data Analytics project for a company-focused mock interview system inspired by WITTMANN BATTENFELD's plastics injection molding, automation, robotics, peripheral equipment, and Industry 4.0 ecosystem.
 

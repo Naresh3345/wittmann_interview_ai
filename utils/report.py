@@ -15,7 +15,7 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
     styles = getSampleStyleSheet()
     story = []
 
-    story.append(Paragraph("Whittmann AI Interview System", styles["Title"]))
+    story.append(Paragraph("Wittmann AI Interview System", styles["Title"]))
     story.append(Paragraph("Candidate Interview Assessment Report", styles["Heading2"]))
     story.append(Paragraph(f"Candidate: {candidate_name}", styles["Normal"]))
     story.append(Paragraph(f"Generated: {datetime.now().strftime('%d-%m-%Y %I:%M %p')}", styles["Normal"]))
