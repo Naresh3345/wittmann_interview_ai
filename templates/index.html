@@ -1,30 +1,31 @@
 {% extends "base.html" %}
 {% block content %}
-<main class="hero">
-  <section class="hero-copy">
-    <p class="eyebrow">Final Year AI & Data Analytics Project</p>
-    <h1>AI-Based Smart Interview System for {{ company_name }}</h1>
-    <p class="subtitle">A professional mock interview platform that evaluates company knowledge, Industry 4.0 thinking, AI problem solving, communication quality, and webcam-based confidence signals.</p>
-    <div class="hero-actions">
-      <a class="btn primary" href="/interview">Start Interview</a>
-      <a class="btn ghost" href="#features">View Features</a>
-    </div>
+<main class="login-layout">
+  <section class="login-copy">
+    <p class="eyebrow">Step 1</p>
+    <h1>Candidate Login</h1>
+    <p class="subtitle">Enter your details first. The next screen lets you choose the WITTMANN interview role/domain.</p>
   </section>
-  <section class="hero-card">
-    <div class="score-ring">AI</div>
-    <h3>Smart Assessment Engine</h3>
-    <p>NLP answer scoring + face presence analysis + PDF interview report.</p>
-    <div class="metric-grid">
-      <div><strong>10</strong><span>WITTMANN Questions</span></div>
-      <div><strong>4</strong><span>Score Metrics</span></div>
-      <div><strong>PDF</strong><span>Report Export</span></div>
-    </div>
+
+  <section class="form-panel">
+    <form method="post" class="candidate-form">
+      <label for="name">Name</label>
+      <input id="name" name="name" placeholder="Enter candidate name" required>
+
+      <label for="email">Email ID</label>
+      <input id="email" name="email" type="email" placeholder="candidate@example.com" required>
+
+      <label for="phone">Phone Number</label>
+      <input id="phone" name="phone" type="tel" placeholder="Enter phone number" required>
+
+      <button class="btn primary full" type="submit">Continue</button>
+    </form>
   </section>
 </main>
 <section class="features" id="features">
-  <article><h3>NLP Answer Evaluation</h3><p>Compares candidate answers with ideal company-specific responses using TF-IDF semantic similarity and keyword matching.</p></article>
-  <article><h3>Speech-to-Text Input</h3><p>Uses browser speech recognition when supported, avoiding paid APIs for college-level deployment.</p></article>
-  <article><h3>Facial Confidence Analysis</h3><p>Uses OpenCV Haar cascades to estimate face presence, stability, and positive engagement.</p></article>
-  <article><h3>Professional Report</h3><p>Generates a PDF report with scores, feedback, matched keywords, and confidence index.</p></article>
+  <article><h3>Login</h3><p>Name, email ID, and phone number are stored before the interview starts.</p></article>
+  <article><h3>Role Selection</h3><p>Manual Testing, Automation Testing, AI Tech Support, and Software Development are available.</p></article>
+  <article><h3>Question Pattern</h3><p>Technical, HR, and project questions are generated from database patterns.</p></article>
+  <article><h3>AI Evaluation</h3><p>Answers, scores, feedback, and final results are stored after submission.</p></article>
 </section>
 {% endblock %}

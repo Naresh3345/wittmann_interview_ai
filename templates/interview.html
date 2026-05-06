@@ -9,9 +9,13 @@
       <span id="faceStatus">Camera starting...</span>
       <small id="emotionStatus">Emotion: Waiting</small>
     </div>
-    <label>Candidate Name</label>
-    <input id="candidateName" placeholder="Enter candidate name" value="Nareshkumar B" />
-    <button class="btn ghost full" onclick="startSpeech()">🎙️ Speak Answer</button>
+    <div class="candidate-summary">
+      <strong>{{ candidate.name }}</strong>
+      <span>{{ candidate.email }}</span>
+      <span>{{ candidate.phone }}</span>
+      <small>{{ role_name }}</small>
+    </div>
+    <button class="btn ghost full" onclick="startSpeech()">Speak Answer</button>
     <button class="btn primary full" onclick="submitInterview()">Submit Interview</button>
   </aside>
 
@@ -19,7 +23,7 @@
     <div class="panel-header">
       <div>
         <p class="eyebrow">{{ company_name }} Focused Assessment</p>
-        <h1>Interview Questions</h1>
+        <h1>{{ role_name }} Interview</h1>
       </div>
       <div class="progress"><span id="answeredCount">0</span>/{{ questions|length }} answered</div>
     </div>

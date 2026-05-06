@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="role-layout">
+  <section class="role-header">
+    <p class="eyebrow">Step 2</p>
+    <h1>Select Job Role</h1>
+    <p class="subtitle">{{ candidate.name }} can now choose the interview domain. The system will fetch the database pattern and generate questions for that role.</p>
+  </section>
+
+  <form method="post" class="role-grid">
+    {% for role in roles %}
+    <label class="role-card">
+      <input type="radio" name="role_id" value="{{ role.role_id }}" required>
+      <span>{{ role.role_name }}</span>
+      <small>Technical + HR + Project pattern</small>
+    </label>
+    {% endfor %}
+    <button class="btn primary role-submit" type="submit">Start Role Interview</button>
+  </form>
+</main>
+{% endblock %}
