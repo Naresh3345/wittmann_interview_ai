@@ -1,9 +1,12 @@
 import base64
 import json
 import os
-import sqlite3
+import random
+import smtplib
+import urllib.parse
+import urllib.request
 import uuid
-from datetime import datetime
+from email.message import EmailMessage
 from pathlib import Path
 
 import cv2
@@ -11,63 +14,29 @@ import numpy as np
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 
+from utils.ai_wrapper import ai_wrapper
+from utils.database import (
+    DB_PATH,
+    complete_interview,
+    create_interview,
+    create_user,
+    ensure_questions_for_role,
+    init_db,
+    list_reports,
+    list_roles,
+    load_database_snapshot,
+    save_candidate_answers,
+)
 from utils.report import generate_pdf_report
-from utils.scoring import feedback_from_score, score_answer
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "questions.json"
-DB_PATH = BASE_DIR / "data" / "interview_system.db"
 REPORT_DIR = BASE_DIR / "reports"
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
-
-ROLES = [
-    ("manual-testing", "Manual Testing"),
-    ("automation-testing", "Automation Testing"),
-    ("ai-tech-support", "AI Tech Support"),
-    ("software-development", "Software Development"),
-]
-
-QUESTION_TOPICS = {
-    "manual-testing": {
-        "Technical": [
-            "test case design", "bug life cycle", "regression testing", "smoke testing", "sanity testing",
-            "defect severity and priority", "test data preparation", "boundary value analysis",
-            "integration testing", "user acceptance testing",
-        ],
-        "HR": ["team communication", "learning attitude", "work ownership", "deadline handling", "career interest"],
-        "Project": ["final year project", "testing strategy", "defect reporting", "test documentation", "quality improvement"],
-    },
-    "ai-tech-support": {
-        "Technical": [
-            "AI troubleshooting", "prompt analysis", "model response validation", "customer issue triage",
-            "data privacy", "API error handling", "knowledge base usage", "root cause analysis",
-            "incident escalation", "support metrics",
-        ],
-        "HR": ["customer empathy", "clear communication", "shift readiness", "team collaboration", "learning attitude"],
-        "Project": ["AI project explanation", "support workflow", "automation idea", "issue resolution example", "documentation practice"],
-    },
-    "automation-testing": {
-        "Technical": [
-            "Selenium basics", "test automation framework", "locator strategy", "test scripts",
-            "CI execution", "API testing", "data driven testing", "report generation",
-            "flaky test handling", "regression automation",
-        ],
-        "HR": ["team communication", "debugging patience", "ownership", "deadline handling", "career interest"],
-        "Project": ["automation project", "framework design", "test reporting", "script maintenance", "quality improvement"],
-    },
-    "software-development": {
-        "Technical": [
-            "Python fundamentals", "database design", "REST API", "debugging", "version control",
-            "object oriented programming", "web development", "error handling", "testing code", "deployment basics",
-        ],
-        "HR": ["team communication", "problem solving", "ownership", "deadline handling", "career interest"],
-        "Project": ["project architecture", "database module", "API implementation", "bug fixing", "future enhancement"],
-    },
-}
 
 cv2_data = getattr(cv2, "data", None)
 haar_folder = getattr(cv2_data, "haarcascades", None) if cv2_data is not None else None
@@ -78,211 +47,80 @@ face_cascade = cv2.CascadeClassifier(os.path.join(haar_folder, "haarcascade_fron
 smile_cascade = cv2.CascadeClassifier(os.path.join(haar_folder, "haarcascade_smile.xml"))
 
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db():
-    DB_PATH.parent.mkdir(exist_ok=True)
-    with get_db() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS roles (
-                role_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_slug TEXT NOT NULL UNIQUE,
-                role_name TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                email TEXT NOT NULL,
-                phone TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS question_patterns (
-                pattern_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL,
-                question_type TEXT NOT NULL,
-                difficulty TEXT NOT NULL,
-                topic TEXT NOT NULL,
-                no_of_questions INTEGER NOT NULL,
-                marks INTEGER NOT NULL,
-                FOREIGN KEY (role_id) REFERENCES roles(role_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS questions (
-                question_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
-                question_text TEXT NOT NULL,
-                expected_answer TEXT NOT NULL,
-                difficulty TEXT NOT NULL,
-                question_type TEXT NOT NULL,
-                FOREIGN KEY (pattern_id) REFERENCES question_patterns(pattern_id),
-                FOREIGN KEY (role_id) REFERENCES roles(role_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS interviews (
-                interview_id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
-                date TEXT NOT NULL,
-                total_score REAL DEFAULT 0,
-                status TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id),
-                FOREIGN KEY (role_id) REFERENCES roles(role_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS candidate_answers (
-                answer_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                interview_id TEXT NOT NULL,
-                question_id INTEGER NOT NULL,
-                answer_text TEXT NOT NULL,
-                ai_score REAL NOT NULL,
-                ai_feedback TEXT NOT NULL,
-                FOREIGN KEY (interview_id) REFERENCES interviews(interview_id),
-                FOREIGN KEY (question_id) REFERENCES questions(question_id)
-            );
-            """
-        )
-        for slug, name in ROLES:
-            conn.execute("INSERT OR IGNORE INTO roles (role_slug, role_name) VALUES (?, ?)", (slug, name))
-        seed_question_patterns(conn)
-
-
-def seed_question_patterns(conn):
-    counts = {"Technical": 10, "HR": 5, "Project": 5}
-    for role in conn.execute("SELECT role_id, role_slug FROM roles"):
-        for question_type, count in counts.items():
-            exists = conn.execute(
-                """
-                SELECT 1 FROM question_patterns
-                WHERE role_id = ? AND question_type = ?
-                """,
-                (role["role_id"], question_type),
-            ).fetchone()
-            if exists:
-                continue
-            conn.execute(
-                """
-                INSERT INTO question_patterns
-                    (role_id, question_type, difficulty, topic, no_of_questions, marks)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    role["role_id"],
-                    question_type,
-                    "Easy + Medium",
-                    ", ".join(QUESTION_TOPICS[role["role_slug"]][question_type]),
-                    count,
-                    5,
-                ),
-            )
-
-
-def list_roles():
-    with get_db() as conn:
-        return [dict(row) for row in conn.execute("SELECT role_id, role_slug, role_name FROM roles ORDER BY role_id")]
-
-
-def question_keywords(topic, role_name, question_type):
-    words = [topic, role_name, question_type, "WITTMANN", "quality", "process"]
-    return [word.lower() for word in words]
-
-
-def build_question(role_name, role_slug, question_type, topic, index, difficulty):
-    if question_type == "Technical":
-        text = f"Explain {topic} for the {role_name} role and give one practical WITTMANN interview example."
-        expected = (
-            f"A strong answer explains {topic}, connects it to the {role_name} role, "
-            "and includes a practical example related to WITTMANN quality, customer support, automation, or software work."
-        )
-    elif question_type == "HR":
-        text = f"How would you show {topic} while working in a WITTMANN {role_name} team?"
-        expected = (
-            f"A strong answer gives a clear personal example of {topic}, shows communication and ownership, "
-            "and explains how the candidate would work professionally with the WITTMANN team."
-        )
-    else:
-        text = f"Describe a project experience where you used {topic} and how it matches the {role_name} role."
-        expected = (
-            f"A strong answer describes the project context, the candidate's contribution in {topic}, "
-            "the tools or methods used, the result, and how it connects to the selected WITTMANN role."
-        )
-    return {
-        "question": text,
-        "expected": expected,
-        "difficulty": "Easy" if index % 2 else "Medium",
-        "keywords": question_keywords(topic, role_name, question_type),
-    }
-
-
-def ensure_questions_for_role(role_id):
-    with get_db() as conn:
-        role = conn.execute("SELECT role_id, role_slug, role_name FROM roles WHERE role_id = ?", (role_id,)).fetchone()
-        if not role:
-            return []
-        patterns = conn.execute("SELECT * FROM question_patterns WHERE role_id = ? ORDER BY pattern_id", (role_id,)).fetchall()
-        for pattern in patterns:
-            existing_count = conn.execute(
-                "SELECT COUNT(*) AS total FROM questions WHERE pattern_id = ?",
-                (pattern["pattern_id"],),
-            ).fetchone()["total"]
-            if existing_count >= pattern["no_of_questions"]:
-                continue
-            topics = QUESTION_TOPICS[role["role_slug"]][pattern["question_type"]]
-            for idx, topic in enumerate(topics[: pattern["no_of_questions"]], start=1):
-                generated = build_question(role["role_name"], role["role_slug"], pattern["question_type"], topic, idx, pattern["difficulty"])
-                conn.execute(
-                    """
-                    INSERT INTO questions
-                        (pattern_id, role_id, question_text, expected_answer, difficulty, question_type)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        pattern["pattern_id"],
-                        role_id,
-                        generated["question"],
-                        generated["expected"],
-                        generated["difficulty"],
-                        pattern["question_type"],
-                    ),
-                )
-        rows = conn.execute(
-            """
-            SELECT q.*, r.role_name
-            FROM questions q
-            JOIN roles r ON r.role_id = q.role_id
-            WHERE q.role_id = ?
-            ORDER BY
-                CASE q.question_type WHEN 'Technical' THEN 1 WHEN 'HR' THEN 2 ELSE 3 END,
-                q.question_id
-            """,
-            (role_id,),
-        ).fetchall()
-    questions = []
-    for row in rows:
-        topic = row["question_text"].split("Explain ", 1)[-1].split(" for ", 1)[0]
-        questions.append(
-            {
-                "id": row["question_id"],
-                "category": row["question_type"],
-                "difficulty": row["difficulty"],
-                "question": row["question_text"],
-                "ideal_answer": row["expected_answer"],
-                "keywords": question_keywords(topic, row["role_name"], row["question_type"]),
-            }
-        )
-    return questions
-
-
 def load_questions():
     with open(DATA_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def create_otp():
+    return str(random.randint(100000, 999999))
+
+
+def send_email_otp(email, otp):
+    smtp_host = os.getenv("SMTP_HOST", "").strip()
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER", "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
+    sender = os.getenv("SMTP_FROM", smtp_user).strip()
+    if not all([smtp_host, smtp_user, smtp_password, sender]):
+        return False
+
+    message = EmailMessage()
+    message["Subject"] = "WITTMANN Interview OTP"
+    message["From"] = sender
+    message["To"] = email
+    message.set_content(f"Your WITTMANN AI Interview OTP is {otp}.")
+
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.send_message(message)
+    return True
+
+
+def send_sms_otp(phone, otp):
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+    from_phone = os.getenv("TWILIO_FROM_PHONE", "").strip()
+    if not all([account_sid, auth_token, from_phone]):
+        return False
+
+    payload = urllib.parse.urlencode(
+        {
+            "From": from_phone,
+            "To": phone,
+            "Body": f"Your WITTMANN AI Interview OTP is {otp}.",
+        }
+    ).encode("utf-8")
+    request_obj = urllib.request.Request(
+        f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json",
+        data=payload,
+    )
+    credentials = f"{account_sid}:{auth_token}".encode("utf-8")
+    request_obj.add_header("Authorization", f"Basic {base64.b64encode(credentials).decode('ascii')}")
+    urllib.request.urlopen(request_obj, timeout=15).read()
+    return True
+
+
+def send_otp(email, phone, otp):
+    sent_to = []
+    try:
+        if send_email_otp(email, otp):
+            sent_to.append("email")
+    except Exception as exc:
+        app.logger.warning("Email OTP failed: %s", exc)
+    try:
+        if send_sms_otp(phone, otp):
+            sent_to.append("phone")
+    except Exception as exc:
+        app.logger.warning("SMS OTP failed: %s", exc)
+    app.logger.info("Candidate OTP for %s / %s: %s", email, phone, otp)
+    return sent_to
+
+
+def admin_key_is_valid():
+    configured_key = os.getenv("ADMIN_REPORT_KEY", "admin123")
+    return request.args.get("key") == configured_key
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -292,15 +130,44 @@ def index():
         email = request.form.get("email", "").strip()
         phone = request.form.get("phone", "").strip()
         if name and email and phone:
-            with get_db() as conn:
-                cursor = conn.execute(
-                    "INSERT INTO users (name, email, phone, created_at) VALUES (?, ?, ?, ?)",
-                    (name, email, phone, datetime.now().isoformat(timespec="seconds")),
-                )
-                session["user_id"] = cursor.lastrowid
-                session["candidate"] = {"name": name, "email": email, "phone": phone}
-            return redirect(url_for("select_role"))
+            otp = create_otp()
+            session["pending_candidate"] = {"name": name, "email": email, "phone": phone}
+            session["login_otp"] = otp
+            session["otp_sent_to"] = send_otp(email, phone, otp)
+            return redirect(url_for("verify_otp"))
     return render_template("index.html", company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"))
+
+
+@app.route("/verify-otp", methods=["GET", "POST"])
+def verify_otp():
+    pending_candidate = session.get("pending_candidate")
+    if not pending_candidate:
+        return redirect(url_for("index"))
+
+    error = ""
+    if request.method == "POST":
+        entered_otp = request.form.get("otp", "").strip()
+        if entered_otp == session.get("login_otp"):
+            session["user_id"] = create_user(
+                pending_candidate["name"],
+                pending_candidate["email"],
+                pending_candidate["phone"],
+            )
+            session["candidate"] = pending_candidate
+            session.pop("pending_candidate", None)
+            session.pop("login_otp", None)
+            session.pop("otp_sent_to", None)
+            return redirect(url_for("select_role"))
+        error = "Invalid OTP. Please check your email or phone and try again."
+
+    return render_template(
+        "otp.html",
+        candidate=pending_candidate,
+        sent_to=session.get("otp_sent_to", []),
+        dev_otp=session.get("login_otp") if not session.get("otp_sent_to") else "",
+        error=error,
+        company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"),
+    )
 
 
 @app.route("/roles", methods=["GET", "POST"])
@@ -330,24 +197,42 @@ def interview():
         return redirect(url_for("index"))
     if "role_id" not in session:
         return redirect(url_for("select_role"))
+
     questions = ensure_questions_for_role(session["role_id"])
     interview_id = str(uuid.uuid4())
     session["interview_id"] = interview_id
     session["face_stats"] = {"total_frames": 0, "detected_frames": 0, "smile_frames": 0, "stable_frames": 0}
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO interviews
-                (interview_id, user_id, role_id, date, total_score, status)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (interview_id, session["user_id"], session["role_id"], datetime.now().isoformat(timespec="seconds"), 0, "Started"),
-        )
+    create_interview(interview_id, session["user_id"], session["role_id"])
+
     return render_template(
         "interview.html",
         questions=questions,
         candidate=session.get("candidate", {}),
         role_name=session.get("role_name", ""),
+        company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"),
+    )
+
+
+@app.route("/admin/database")
+def admin_database():
+    if not admin_key_is_valid():
+        return "Admin access required. Add ?key=admin123 to the URL or set ADMIN_REPORT_KEY in .env.", 403
+    return render_template(
+        "database.html",
+        tables=load_database_snapshot(),
+        db_path=DB_PATH,
+        company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"),
+    )
+
+
+@app.route("/admin/reports")
+def admin_reports():
+    if not admin_key_is_valid():
+        return "Admin access required. Add ?key=admin123 to the URL or set ADMIN_REPORT_KEY in .env.", 403
+    return render_template(
+        "admin_reports.html",
+        reports=list_reports(),
+        admin_key=request.args.get("key", ""),
         company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"),
     )
 
@@ -411,54 +296,40 @@ def submit_interview():
     results = []
     for question in questions:
         answer = answers.get(str(question["id"]), "")
-        score = score_answer(answer, question)
-        results.append({
-            "question": question,
-            "answer": answer,
-            "score": score,
-            "feedback": feedback_from_score(score["total_score"])
-        })
+        evaluation = ai_wrapper.evaluate_answer(answer, question)
+        results.append(
+            {
+                "question": question,
+                "answer": answer,
+                "score": evaluation["score"],
+                "feedback": evaluation["feedback"],
+            }
+        )
 
     interview_id = session.get("interview_id")
     overall = round(sum(r["score"]["total_score"] for r in results) / max(len(results), 1), 2)
     if interview_id:
-        with get_db() as conn:
-            conn.execute("DELETE FROM candidate_answers WHERE interview_id = ?", (interview_id,))
-            for result in results:
-                conn.execute(
-                    """
-                    INSERT INTO candidate_answers
-                        (interview_id, question_id, answer_text, ai_score, ai_feedback)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        interview_id,
-                        result["question"]["id"],
-                        result["answer"],
-                        result["score"]["total_score"],
-                        result["feedback"],
-                    ),
-                )
-            conn.execute(
-                "UPDATE interviews SET total_score = ?, status = ? WHERE interview_id = ?",
-                (overall, "Completed", interview_id),
-            )
+        save_candidate_answers(interview_id, results)
 
     stats = session.get("face_stats", {"total_frames": 0, "detected_frames": 0, "smile_frames": 0, "stable_frames": 0})
     total = max(stats.get("total_frames", 0), 1)
     face_summary = {
         **stats,
-        "confidence_index": round(((stats.get("detected_frames", 0) / total) * 55) + ((stats.get("stable_frames", 0) / total) * 30) + ((stats.get("smile_frames", 0) / total) * 15), 2)
+        "confidence_index": round(((stats.get("detected_frames", 0) / total) * 55) + ((stats.get("stable_frames", 0) / total) * 30) + ((stats.get("smile_frames", 0) / total) * 15), 2),
     }
     report_path = generate_pdf_report(candidate_name, results, face_summary, str(REPORT_DIR))
     session["last_report"] = report_path
+    if interview_id:
+        complete_interview(interview_id, overall, report_path)
 
-    return jsonify({"overall_score": overall, "results": results, "face_summary": face_summary, "report_url": "/download-report"})
+    return jsonify({"submitted": True, "message": "Interview submitted successfully. The admin will review your report."})
 
 
 @app.route("/download-report")
 def download_report():
-    path = session.get("last_report")
+    if not admin_key_is_valid():
+        return "Admin access required", 403
+    path = request.args.get("path") or session.get("last_report")
     if not path or not Path(path).exists():
         return "No report available", 404
     return send_file(path, as_attachment=True)

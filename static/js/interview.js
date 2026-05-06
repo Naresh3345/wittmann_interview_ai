@@ -90,11 +90,12 @@ async function submitInterview() {
 function renderResults(data) {
   const results = document.getElementById('results');
   results.hidden = false;
-  results.innerHTML = `<h2>Interview Results</h2><h3>Overall Score: ${data.overall_score}%</h3><p><strong>Face Confidence Index:</strong> ${data.face_summary.confidence_index}%</p>`;
-  data.results.forEach((r, i) => {
-    results.innerHTML += `<div class="result-card"><h3>${i + 1}. ${r.question.category} - ${r.score.total_score}%</h3><div class="score-line"><div class="score-fill" style="width:${r.score.total_score}%"></div></div><p>${r.feedback}</p><p><strong>Matched:</strong> ${r.score.matched_keywords.join(', ') || 'None'}</p><p><strong>Improve with:</strong> ${r.score.missing_keywords.slice(0, 4).join(', ') || 'Good coverage'}</p></div>`;
-  });
-  results.innerHTML += `<a class="btn primary download-link" href="${data.report_url}">Download PDF Report</a>`;
+  results.innerHTML = `
+    <div class="result-card">
+      <h2>Interview Submitted</h2>
+      <p>${data.message || 'Interview submitted successfully. The admin will review your report.'}</p>
+    </div>
+  `;
   results.scrollIntoView({ behavior: 'smooth' });
 }
 
