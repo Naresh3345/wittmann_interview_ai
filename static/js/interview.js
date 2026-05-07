@@ -102,10 +102,10 @@ function startSection(sectionName) {
     item.hidden = item.dataset.section !== sectionName;
   });
   document.getElementById('sectionLauncher').hidden = false;
-  const firstBox = document.querySelector(`.question-card[data-section="${sectionName}"] textarea`);
-  if (firstBox) {
-    firstBox.focus();
-    activeAnswerId = firstBox.id;
+  const firstInput = document.querySelector(`.question-card[data-section="${sectionName}"] textarea, .question-card[data-section="${sectionName}"] input`);
+  if (firstInput) {
+    firstInput.focus();
+    activeAnswerId = firstInput.id || activeAnswerId;
   }
 }
 
@@ -116,7 +116,8 @@ window.addEventListener('blur', () => {
 function updateAnsweredCount() {
   const count = window.QUESTIONS.filter((q) => {
     const answerBox = document.getElementById(`answer-${q.id}`);
-    return answerBox && answerBox.value.trim().length > 0;
+    const selectedOption = document.querySelector(`input[name="answer-${q.id}"]:checked`);
+    return (answerBox && answerBox.value.trim().length > 0) || Boolean(selectedOption);
   }).length;
   document.getElementById('answeredCount').innerText = count;
 }
@@ -147,7 +148,9 @@ function startSpeech() {
 async function submitInterview() {
   const answers = {};
   window.QUESTIONS.forEach((q) => {
-    answers[q.id] = document.getElementById(`answer-${q.id}`).value.trim();
+    const selectedOption = document.querySelector(`input[name="answer-${q.id}"]:checked`);
+    const answerBox = document.getElementById(`answer-${q.id}`);
+    answers[q.id] = selectedOption ? selectedOption.value : (answerBox ? answerBox.value.trim() : '');
   });
   const res = await fetch('/api/submit', {
     method: 'POST',
@@ -164,7 +167,7 @@ function renderResults(data) {
   results.innerHTML = `
     <div class="result-card">
       <h2>Interview Submitted</h2>
-      <p>${data.message || 'Interview submitted successfully. Result is available only for admin review.'}</p>
+      <p>${data.message || 'Thank you. Once you are shortlisted, you will be notified.'}</p>
     </div>
   `;
   results.scrollIntoView({ behavior: 'smooth' });

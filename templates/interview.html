@@ -66,7 +66,18 @@
       <article class="question-card test-section" data-section="{{ q.category }}" data-question-id="{{ q.id }}" hidden>
         <div class="question-meta"><span>{{ q.category }}</span><span>{{ q.difficulty }}</span></div>
         <h3>{{ loop.index }}. {{ q.question | replace('\n', '<br>') | safe }}</h3>
+        {% if q.options %}
+        <div class="option-list" data-answer-group="{{ q.id }}">
+          {% for option in q.options %}
+          <label class="option-row">
+            <input type="radio" name="answer-{{ q.id }}" value="{{ option }}" onchange="updateAnsweredCount()">
+            <span>{{ option }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        {% else %}
         <textarea id="answer-{{ q.id }}" oninput="updateAnsweredCount()" placeholder="Type your final answer here..."></textarea>
+        {% endif %}
       </article>
       {% endfor %}
     </div>

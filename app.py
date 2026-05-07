@@ -124,6 +124,15 @@ def admin_key_is_valid():
     return request.args.get("key") == configured_key
 
 
+def shortlist_candidate(overall_score, proctoring_violations):
+    violation_count = len(proctoring_violations)
+    if overall_score >= 70 and violation_count <= 2:
+        return "Shortlisted", "Candidate met the score benchmark with acceptable proctoring activity."
+    if violation_count > 2:
+        return "Needs Review", "Candidate score requires manual review because proctoring alerts were triggered."
+    return "Not Shortlisted", "Candidate did not meet the minimum shortlist score."
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
@@ -334,12 +343,15 @@ def submit_interview():
         "confidence_index": round(((stats.get("detected_frames", 0) / total) * 55) + ((stats.get("stable_frames", 0) / total) * 30) + ((stats.get("smile_frames", 0) / total) * 15), 2),
         "proctoring_violations": proctoring_violations,
     }
+    shortlist_status, shortlist_reason = shortlist_candidate(overall, proctoring_violations)
+    face_summary["shortlist_status"] = shortlist_status
+    face_summary["shortlist_reason"] = shortlist_reason
     report_path = generate_pdf_report(candidate_name, results, face_summary, str(REPORT_DIR))
     session["last_report"] = report_path
     if interview_id:
-        complete_interview(interview_id, overall, report_path)
+        complete_interview(interview_id, overall, report_path, shortlist_status, shortlist_reason)
 
-    return jsonify({"submitted": True, "message": "Interview submitted successfully. Result is available only for admin review."})
+    return jsonify({"submitted": True, "message": "Thank you. Once you are shortlisted, you will be notified."})
 
 
 @app.route("/download-report")

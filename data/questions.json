@@ -3,40 +3,30 @@
     "id": 1,
     "category": "Aptitude",
     "difficulty": "Easy",
-    "question": "Logical Reasoning: If all quality reports are reviewed and some reviewed reports need retesting, can every retesting report be a quality report? Explain your answer.",
-    "keywords": ["logical", "reasoning", "quality", "reviewed", "retesting"],
-    "ideal_answer": "No. Some reviewed reports need retesting, but that does not prove every retesting report belongs to the quality report group."
+    "question": "Logical Reasoning: If all plastics are materials and some materials are recyclable, which conclusion is valid?",
+    "options": ["A. All plastics are recyclable", "B. Some materials are plastics", "C. No material is recyclable", "D. All recyclable items are plastics"],
+    "keywords": ["logical", "reasoning", "option"],
+    "correct_answer": "B. Some materials are plastics",
+    "ideal_answer": "B. Some materials are plastics"
   },
   {
     "id": 2,
     "category": "Aptitude",
     "difficulty": "Easy",
-    "question": "Verbal Ability: Choose the correct sentence and explain why: 'The test cases was executed' or 'The test cases were executed'.",
-    "keywords": ["verbal", "grammar", "were", "plural", "sentence"],
-    "ideal_answer": "The correct sentence is 'The test cases were executed' because test cases is plural and needs the plural verb were."
+    "question": "Verbal Ability: Choose the grammatically correct sentence.",
+    "options": ["A. The test cases was executed", "B. The test cases were executed", "C. The test cases is executed", "D. The test cases has executed"],
+    "keywords": ["verbal", "grammar", "option"],
+    "correct_answer": "B. The test cases were executed",
+    "ideal_answer": "B. The test cases were executed"
   },
   {
     "id": 3,
-    "category": "Aptitude",
-    "difficulty": "Medium",
-    "question": "Programming Aptitude: If a loop starts at 1 and doubles the value each time until it becomes greater than 32, how many times does the loop run?",
-    "keywords": ["programming", "loop", "double", "32", "six"],
-    "ideal_answer": "The loop runs six times for values 1, 2, 4, 8, 16, and 32 before the next doubled value becomes greater than 32."
-  },
-  {
-    "id": 4,
     "category": "Programming",
-    "difficulty": "Medium",
+    "difficulty": "Easy",
     "question": "Programming - Java compiler style question:\n\nCode:\nString s = \"test\";\nSystem.out.println(s.substring(1, 3).toUpperCase());\n\nWhat is the output?\nTest case: input = \"test\"",
-    "keywords": ["java", "output", "substring", "uppercase", "ES"],
-    "ideal_answer": "The output is ES because substring(1, 3) returns es and toUpperCase converts it to ES."
-  },
-  {
-    "id": 5,
-    "category": "Programming",
-    "difficulty": "Medium",
-    "question": "Programming - Python compiler style question:\n\nCode:\nnums = [2, 4, 6]\nprint(sum(nums) // len(nums))\n\nWhat is the output?\nTest case: nums = [2, 4, 6]",
-    "keywords": ["python", "output", "sum", "integer division", "4"],
-    "ideal_answer": "The output is 4 because sum(nums) is 12, len(nums) is 3, and integer division gives 4."
+    "options": [],
+    "keywords": ["java", "output"],
+    "correct_answer": "ES",
+    "ideal_answer": "ES"
   }
 ]

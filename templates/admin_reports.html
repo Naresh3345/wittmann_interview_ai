@@ -22,6 +22,7 @@
             <th>Role</th>
             <th>Date</th>
             <th>Score</th>
+            <th>Shortlist</th>
             <th>Status</th>
             <th>Report</th>
           </tr>
@@ -35,6 +36,10 @@
             <td>{{ report.role_name }}</td>
             <td>{{ report.date }}</td>
             <td>{{ report.total_score }}%</td>
+            <td>
+              <strong>{{ report.shortlist_status or 'Pending' }}</strong><br>
+              <small>{{ report.shortlist_reason or '' }}</small>
+            </td>
             <td>{{ report.status }}</td>
             <td>
               <a class="table-link" href="/download-report?key={{ admin_key }}&path={{ report.report_path | urlencode }}">Download PDF</a>

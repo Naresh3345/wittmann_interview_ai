@@ -44,7 +44,26 @@ def communication_score(answer: str) -> float:
     return float((length_score * 0.45) + (unique_ratio * 0.25) + (clarity_score * 0.30))
 
 
+def exact_answer_score(answer: str, correct_answer: str) -> float:
+    answer_clean = clean_text(answer)
+    correct_clean = clean_text(correct_answer)
+    if not answer_clean or not correct_clean:
+        return 0.0
+    return 1.0 if answer_clean == correct_clean or answer_clean in correct_clean or correct_clean in answer_clean else 0.0
+
+
 def score_answer(answer: str, question: Dict) -> Dict:
+    if question.get("category") in {"Aptitude", "Programming"} and question.get("correct_answer"):
+        exact = exact_answer_score(answer, question["correct_answer"])
+        return {
+            "keyword_score": round(exact * 100, 2),
+            "semantic_score": round(exact * 100, 2),
+            "communication_score": round(exact * 100, 2),
+            "total_score": round(exact * 100, 2),
+            "matched_keywords": [question["correct_answer"]] if exact else [],
+            "missing_keywords": [] if exact else [question["correct_answer"]],
+        }
+
     kw = keyword_score(answer, question.get("keywords", []))
     sem = semantic_score(answer, question.get("ideal_answer", ""))
     comm = communication_score(answer)

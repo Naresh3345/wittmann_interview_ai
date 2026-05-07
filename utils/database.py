@@ -21,13 +21,23 @@ QUESTION_TOPICS = {
             "Logical Reasoning",
             "Verbal Ability",
             "Programming Aptitude",
-            "Manual Testing Scenario Aptitude",
+            "Number Series",
+            "Percentage",
+            "Ratio and Proportion",
+            "Time and Work",
+            "Data Interpretation",
+            "Statement and Conclusion",
+            "Error Spotting",
+            "Synonyms",
+            "Pseudocode Logic",
+            "Manual Testing Bug Priority",
+            "Manual Testing Test Case Logic",
+            "Manual Testing Defect Flow",
         ],
         "Programming": [
-            "Java output tracing for strings",
-            "Python list output tracing",
-            "C array output tracing",
-            "C++ loop output tracing",
+            "Easy Java output tracing",
+            "Medium Python output tracing",
+            "Hard C++ output tracing",
         ],
     },
     "ai-tech-support": {
@@ -35,13 +45,23 @@ QUESTION_TOPICS = {
             "Logical Reasoning",
             "Verbal Ability",
             "Programming Aptitude",
-            "AI Tech Support Scenario Aptitude",
+            "Number Series",
+            "Percentage",
+            "Ratio and Proportion",
+            "Time and Work",
+            "Data Interpretation",
+            "Statement and Conclusion",
+            "Error Spotting",
+            "Synonyms",
+            "Pseudocode Logic",
+            "AI Tech Support Ticket Priority",
+            "AI Tech Support Troubleshooting Logic",
+            "AI Tech Support Escalation Flow",
         ],
         "Programming": [
-            "Java output tracing for strings",
-            "Python list output tracing",
-            "C array output tracing",
-            "C++ loop output tracing",
+            "Easy Java output tracing",
+            "Medium Python output tracing",
+            "Hard C++ output tracing",
         ],
     },
     "automation-testing": {
@@ -49,13 +69,23 @@ QUESTION_TOPICS = {
             "Logical Reasoning",
             "Verbal Ability",
             "Programming Aptitude",
-            "Automation Testing Scenario Aptitude",
+            "Number Series",
+            "Percentage",
+            "Ratio and Proportion",
+            "Time and Work",
+            "Data Interpretation",
+            "Statement and Conclusion",
+            "Error Spotting",
+            "Synonyms",
+            "Pseudocode Logic",
+            "Automation Testing Locator Logic",
+            "Automation Testing Regression Priority",
+            "Automation Testing Failure Analysis",
         ],
         "Programming": [
-            "Java output tracing for strings",
-            "Python list output tracing",
-            "C array output tracing",
-            "C++ loop output tracing",
+            "Easy Java output tracing",
+            "Medium Python output tracing",
+            "Hard C++ output tracing",
         ],
     },
     "software-development": {
@@ -63,18 +93,28 @@ QUESTION_TOPICS = {
             "Logical Reasoning",
             "Verbal Ability",
             "Programming Aptitude",
-            "Software Development Scenario Aptitude",
+            "Number Series",
+            "Percentage",
+            "Ratio and Proportion",
+            "Time and Work",
+            "Data Interpretation",
+            "Statement and Conclusion",
+            "Error Spotting",
+            "Synonyms",
+            "Pseudocode Logic",
+            "Software Development Debug Logic",
+            "Software Development API Logic",
+            "Software Development Database Logic",
         ],
         "Programming": [
-            "Java output tracing for strings",
-            "Python list output tracing",
-            "C array output tracing",
-            "C++ loop output tracing",
+            "Easy Java output tracing",
+            "Medium Python output tracing",
+            "Hard C++ output tracing",
         ],
     },
 }
 
-SECTION_COUNTS = {"Aptitude": 4, "Programming": 4}
+SECTION_COUNTS = {"Aptitude": 15, "Programming": 3}
 
 
 def get_db():
@@ -133,6 +173,8 @@ def init_db():
                 date TEXT NOT NULL,
                 total_score REAL DEFAULT 0,
                 status TEXT NOT NULL,
+                shortlist_status TEXT,
+                shortlist_reason TEXT,
                 report_path TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(user_id),
                 FOREIGN KEY (role_id) REFERENCES roles(role_id)
@@ -152,6 +194,8 @@ def init_db():
         )
         ensure_column(conn, "users", "otp_verified", "INTEGER DEFAULT 0")
         ensure_column(conn, "interviews", "report_path", "TEXT")
+        ensure_column(conn, "interviews", "shortlist_status", "TEXT")
+        ensure_column(conn, "interviews", "shortlist_reason", "TEXT")
         for slug, name in ROLES:
             conn.execute("INSERT OR IGNORE INTO roles (role_slug, role_name) VALUES (?, ?)", (slug, name))
         seed_question_patterns(conn)
@@ -192,7 +236,7 @@ def seed_question_patterns(conn):
                 (
                     role["role_id"],
                     question_type,
-                    "Easy + Medium",
+                    "Easy + Medium + Hard" if question_type == "Programming" else "Easy + Medium",
                     desired_topics[question_type],
                     count,
                     5,
@@ -229,11 +273,15 @@ def create_interview(interview_id, user_id, role_id):
         )
 
 
-def complete_interview(interview_id, total_score, report_path):
+def complete_interview(interview_id, total_score, report_path, shortlist_status, shortlist_reason):
     with get_db() as conn:
         conn.execute(
-            "UPDATE interviews SET total_score = ?, status = ?, report_path = ? WHERE interview_id = ?",
-            (total_score, "Completed", report_path, interview_id),
+            """
+            UPDATE interviews
+            SET total_score = ?, status = ?, report_path = ?, shortlist_status = ?, shortlist_reason = ?
+            WHERE interview_id = ?
+            """,
+            (total_score, "Completed", report_path, shortlist_status, shortlist_reason, interview_id),
         )
 
 
@@ -261,7 +309,8 @@ def list_reports():
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT i.interview_id, i.date, i.total_score, i.status, i.report_path,
+            SELECT i.interview_id, i.date, i.total_score, i.status, i.shortlist_status,
+                   i.shortlist_reason, i.report_path,
                    u.name, u.email, u.phone, r.role_name
             FROM interviews i
             JOIN users u ON u.user_id = i.user_id
@@ -274,8 +323,15 @@ def list_reports():
 
 
 def question_keywords(topic, role_name, question_type):
-    words = [topic, role_name, question_type, "logical", "verbal", "programming", "java", "python", "c", "c++", "output"]
+    words = [topic, role_name, question_type, "logical", "verbal", "programming", "java", "python", "c", "c++", "output", "option"]
     return [word.lower() for word in words]
+
+
+def parse_question_options(question_text):
+    if "\nOptions:\n" not in question_text:
+        return question_text, []
+    prompt, option_text = question_text.split("\nOptions:\n", 1)
+    return prompt, [line.strip() for line in option_text.splitlines() if line.strip()]
 
 
 def ensure_questions_for_role(role_id):
@@ -323,14 +379,17 @@ def ensure_questions_for_role(role_id):
         ).fetchall()
     questions = []
     for row in rows:
-        topic = row["question_text"].split("Explain ", 1)[-1].split(" for ", 1)[0]
+        prompt, options = parse_question_options(row["question_text"])
+        topic = prompt.split(":", 1)[0]
         questions.append(
             {
                 "id": row["question_id"],
                 "category": row["question_type"],
                 "difficulty": row["difficulty"],
-                "question": row["question_text"],
+                "question": prompt,
                 "ideal_answer": row["expected_answer"],
+                "correct_answer": row["expected_answer"],
+                "options": options,
                 "keywords": question_keywords(topic, row["role_name"], row["question_type"]),
             }
         )
