@@ -15,7 +15,7 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
     styles = getSampleStyleSheet()
     story = []
 
-    story.append(Paragraph("Wittmann AI Interview System", styles["Title"]))
+    story.append(Paragraph("WITTMANN BATTENFELD India Pvt. Ltd. AI Interview System", styles["Title"]))
     story.append(Paragraph("Candidate Interview Assessment Report", styles["Heading2"]))
     story.append(Paragraph(f"Candidate: {candidate_name}", styles["Normal"]))
     story.append(Paragraph(f"Generated: {datetime.now().strftime('%d-%m-%Y %I:%M %p')}", styles["Normal"]))
@@ -25,6 +25,8 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
     story.append(Paragraph(f"Overall Score: {avg:.2f}%", styles["Heading2"]))
     story.append(Paragraph(f"Face Confidence Index: {face_summary.get('confidence_index', 0)}%", styles["Normal"]))
     story.append(Paragraph(f"Detected Frames: {face_summary.get('detected_frames', 0)} / {face_summary.get('total_frames', 0)}", styles["Normal"]))
+    violations = face_summary.get("proctoring_violations", [])
+    story.append(Paragraph(f"Proctoring Alerts: {len(violations)}", styles["Normal"]))
     story.append(Spacer(1, 12))
 
     data = [["Q.No", "Category", "Score", "Feedback"]]

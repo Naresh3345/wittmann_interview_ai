@@ -34,6 +34,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "questions.json"
 REPORT_DIR = BASE_DIR / "reports"
+DEFAULT_COMPANY_NAME = "WITTMANN BATTENFELD India Pvt. Ltd."
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
@@ -66,10 +67,10 @@ def send_email_otp(email, otp):
         return False
 
     message = EmailMessage()
-    message["Subject"] = "WITTMANN Interview OTP"
+    message["Subject"] = f"{DEFAULT_COMPANY_NAME} Interview OTP"
     message["From"] = sender
     message["To"] = email
-    message.set_content(f"Your WITTMANN AI Interview OTP is {otp}.")
+    message.set_content(f"Your {DEFAULT_COMPANY_NAME} AI Interview OTP is {otp}.")
 
     with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
         server.starttls()
@@ -89,7 +90,7 @@ def send_sms_otp(phone, otp):
         {
             "From": from_phone,
             "To": phone,
-            "Body": f"Your WITTMANN AI Interview OTP is {otp}.",
+            "Body": f"Your {DEFAULT_COMPANY_NAME} AI Interview OTP is {otp}.",
         }
     ).encode("utf-8")
     request_obj = urllib.request.Request(
@@ -135,7 +136,7 @@ def index():
             session["login_otp"] = otp
             session["otp_sent_to"] = send_otp(email, phone, otp)
             return redirect(url_for("verify_otp"))
-    return render_template("index.html", company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"))
+    return render_template("index.html", company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME))
 
 
 @app.route("/verify-otp", methods=["GET", "POST"])
@@ -166,7 +167,7 @@ def verify_otp():
         sent_to=session.get("otp_sent_to", []),
         dev_otp=session.get("login_otp") if not session.get("otp_sent_to") else "",
         error=error,
-        company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"),
+        company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
 
@@ -187,7 +188,7 @@ def select_role():
         "roles.html",
         roles=roles,
         candidate=session.get("candidate", {}),
-        company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"),
+        company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
 
@@ -209,7 +210,7 @@ def interview():
         questions=questions,
         candidate=session.get("candidate", {}),
         role_name=session.get("role_name", ""),
-        company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"),
+        company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
 
@@ -221,7 +222,7 @@ def admin_database():
         "database.html",
         tables=load_database_snapshot(),
         db_path=DB_PATH,
-        company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"),
+        company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
 
@@ -233,7 +234,7 @@ def admin_reports():
         "admin_reports.html",
         reports=list_reports(),
         admin_key=request.args.get("key", ""),
-        company_name=os.getenv("COMPANY_NAME", "WITTMANN BATTENFELD"),
+        company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
 
@@ -260,7 +261,14 @@ def analyze_frame():
         stats = session.get("face_stats", {"total_frames": 0, "detected_frames": 0, "smile_frames": 0, "stable_frames": 0})
         stats["total_frames"] += 1
 
-        result = {"face_detected": False, "emotion": "Neutral", "confidence_hint": "Keep your face centered and maintain eye contact."}
+        result = {
+            "face_detected": False,
+            "multiple_faces": False,
+            "emotion": "Neutral",
+            "confidence_hint": "Keep your face centered and maintain eye contact.",
+            "alert_level": "warning",
+            "alert_reason": "No face detected in camera frame.",
+        }
         if len(faces) > 0:
             stats["detected_frames"] += 1
             x, y, w, h = max(faces, key=lambda r: r[2] * r[3])
@@ -277,7 +285,14 @@ def analyze_frame():
             else:
                 emotion = "Focused"
                 hint = "Good focus detected. Add a natural smile when appropriate."
-            result = {"face_detected": True, "emotion": emotion, "confidence_hint": hint}
+            result = {
+                "face_detected": True,
+                "multiple_faces": len(faces) > 1,
+                "emotion": emotion,
+                "confidence_hint": hint,
+                "alert_level": "danger" if len(faces) > 1 else "ok",
+                "alert_reason": "Multiple faces detected in camera frame." if len(faces) > 1 else "",
+            }
 
         session["face_stats"] = stats
         return jsonify(result)
@@ -291,6 +306,7 @@ def submit_interview():
     candidate = session.get("candidate", {})
     candidate_name = candidate.get("name") or payload.get("candidate_name", "Candidate")
     answers = payload.get("answers", {})
+    proctoring_violations = payload.get("proctoring_violations", [])
     questions = ensure_questions_for_role(session.get("role_id")) if session.get("role_id") else load_questions()
 
     results = []
@@ -316,13 +332,14 @@ def submit_interview():
     face_summary = {
         **stats,
         "confidence_index": round(((stats.get("detected_frames", 0) / total) * 55) + ((stats.get("stable_frames", 0) / total) * 30) + ((stats.get("smile_frames", 0) / total) * 15), 2),
+        "proctoring_violations": proctoring_violations,
     }
     report_path = generate_pdf_report(candidate_name, results, face_summary, str(REPORT_DIR))
     session["last_report"] = report_path
     if interview_id:
         complete_interview(interview_id, overall, report_path)
 
-    return jsonify({"submitted": True, "message": "Interview submitted successfully. The admin will review your report."})
+    return jsonify({"submitted": True, "message": "Interview submitted successfully. Result is available only for admin review."})
 
 
 @app.route("/download-report")

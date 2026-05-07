@@ -4,18 +4,82 @@
   <section class="role-header">
     <p class="eyebrow">Step 2</p>
     <h1>Select Job Role</h1>
-    <p class="subtitle">{{ candidate.name }} can now choose the interview domain. The system will fetch the database pattern and generate questions for that role.</p>
+    <p class="subtitle">{{ candidate.name }} can now choose the interview domain. After role selection, the browser will request camera access and run a compatibility check before starting.</p>
   </section>
 
-  <form method="post" class="role-grid">
+  <form method="post" class="role-grid" id="roleForm">
     {% for role in roles %}
     <label class="role-card">
       <input type="radio" name="role_id" value="{{ role.role_id }}" required>
       <span>{{ role.role_name }}</span>
-      <small>Technical + HR + Project pattern</small>
+      <small>Section 1: Aptitude | Section 2: Programming output tests</small>
     </label>
     {% endfor %}
+    <div class="compatibility-panel" id="compatibilityPanel" hidden>
+      <strong>System Compatibility</strong>
+      <ul id="compatibilityList"></ul>
+      <p id="compatibilityMessage"></p>
+    </div>
     <button class="btn primary role-submit" type="submit">Start Role Interview</button>
   </form>
 </main>
+<script>
+  const roleForm = document.getElementById('roleForm');
+  const panel = document.getElementById('compatibilityPanel');
+  const list = document.getElementById('compatibilityList');
+  const message = document.getElementById('compatibilityMessage');
+
+  function addCheck(label, passed) {
+    const item = document.createElement('li');
+    item.className = passed ? 'check-pass' : 'check-fail';
+    item.textContent = `${passed ? 'Pass' : 'Fail'} - ${label}`;
+    list.appendChild(item);
+    return passed;
+  }
+
+  async function runCompatibilityCheck() {
+    panel.hidden = false;
+    list.innerHTML = '';
+    message.textContent = 'Checking browser and camera readiness...';
+
+    const checks = [
+      addCheck('JavaScript is enabled', true),
+      addCheck('Camera API is available', Boolean(navigator.mediaDevices?.getUserMedia)),
+      addCheck('Page visibility monitoring is available', typeof document.hidden !== 'undefined'),
+      addCheck('Modern browser storage is available', Boolean(window.localStorage)),
+      addCheck('Screen size is suitable for interview', window.innerWidth >= 900 && window.innerHeight >= 600),
+    ];
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      checks.push(addCheck('Camera permission granted', true));
+    } catch (error) {
+      checks.push(addCheck('Camera permission granted', false));
+    } finally {
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    }
+
+    const passed = checks.every(Boolean);
+    message.textContent = passed
+      ? 'Compatibility passed. Starting interview...'
+      : 'Compatibility failed. Please allow camera access and use a larger screen before starting.';
+    return passed;
+  }
+
+  roleForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const selectedRole = roleForm.querySelector('input[name="role_id"]:checked');
+    if (!selectedRole) {
+      roleForm.reportValidity();
+      return;
+    }
+    const passed = await runCompatibilityCheck();
+    if (passed) {
+      roleForm.submit();
+    }
+  });
+</script>
 {% endblock %}

@@ -17,41 +17,64 @@ ROLES = [
 
 QUESTION_TOPICS = {
     "manual-testing": {
-        "Technical": [
-            "test case design", "bug life cycle", "regression testing", "smoke testing", "sanity testing",
-            "defect severity and priority", "test data preparation", "boundary value analysis",
-            "integration testing", "user acceptance testing",
+        "Aptitude": [
+            "Logical Reasoning",
+            "Verbal Ability",
+            "Programming Aptitude",
+            "Manual Testing Scenario Aptitude",
         ],
-        "HR": ["team communication", "learning attitude", "work ownership", "deadline handling", "career interest"],
-        "Project": ["final year project", "testing strategy", "defect reporting", "test documentation", "quality improvement"],
+        "Programming": [
+            "Java output tracing for strings",
+            "Python list output tracing",
+            "C array output tracing",
+            "C++ loop output tracing",
+        ],
     },
     "ai-tech-support": {
-        "Technical": [
-            "AI troubleshooting", "prompt analysis", "model response validation", "customer issue triage",
-            "data privacy", "API error handling", "knowledge base usage", "root cause analysis",
-            "incident escalation", "support metrics",
+        "Aptitude": [
+            "Logical Reasoning",
+            "Verbal Ability",
+            "Programming Aptitude",
+            "AI Tech Support Scenario Aptitude",
         ],
-        "HR": ["customer empathy", "clear communication", "shift readiness", "team collaboration", "learning attitude"],
-        "Project": ["AI project explanation", "support workflow", "automation idea", "issue resolution example", "documentation practice"],
+        "Programming": [
+            "Java output tracing for strings",
+            "Python list output tracing",
+            "C array output tracing",
+            "C++ loop output tracing",
+        ],
     },
     "automation-testing": {
-        "Technical": [
-            "Selenium basics", "test automation framework", "locator strategy", "test scripts",
-            "CI execution", "API testing", "data driven testing", "report generation",
-            "flaky test handling", "regression automation",
+        "Aptitude": [
+            "Logical Reasoning",
+            "Verbal Ability",
+            "Programming Aptitude",
+            "Automation Testing Scenario Aptitude",
         ],
-        "HR": ["team communication", "debugging patience", "ownership", "deadline handling", "career interest"],
-        "Project": ["automation project", "framework design", "test reporting", "script maintenance", "quality improvement"],
+        "Programming": [
+            "Java output tracing for strings",
+            "Python list output tracing",
+            "C array output tracing",
+            "C++ loop output tracing",
+        ],
     },
     "software-development": {
-        "Technical": [
-            "Python fundamentals", "database design", "REST API", "debugging", "version control",
-            "object oriented programming", "web development", "error handling", "testing code", "deployment basics",
+        "Aptitude": [
+            "Logical Reasoning",
+            "Verbal Ability",
+            "Programming Aptitude",
+            "Software Development Scenario Aptitude",
         ],
-        "HR": ["team communication", "problem solving", "ownership", "deadline handling", "career interest"],
-        "Project": ["project architecture", "database module", "API implementation", "bug fixing", "future enhancement"],
+        "Programming": [
+            "Java output tracing for strings",
+            "Python list output tracing",
+            "C array output tracing",
+            "C++ loop output tracing",
+        ],
     },
 }
+
+SECTION_COUNTS = {"Aptitude": 4, "Programming": 4}
 
 
 def get_db():
@@ -141,9 +164,19 @@ def ensure_column(conn, table_name, column_name, column_definition):
 
 
 def seed_question_patterns(conn):
-    counts = {"Technical": 10, "HR": 5, "Project": 5}
     for role in conn.execute("SELECT role_id, role_slug FROM roles"):
-        for question_type, count in counts.items():
+        role_topics = QUESTION_TOPICS[role["role_slug"]]
+        desired_topics = {section: ", ".join(topics) for section, topics in role_topics.items()}
+        existing_types = {
+            row["question_type"]
+            for row in conn.execute("SELECT DISTINCT question_type FROM question_patterns WHERE role_id = ?", (role["role_id"],))
+        }
+        current_patterns = conn.execute("SELECT question_type, topic FROM question_patterns WHERE role_id = ?", (role["role_id"],)).fetchall()
+        topics_match = all(row["topic"] == desired_topics.get(row["question_type"]) for row in current_patterns)
+        if existing_types and (existing_types != set(SECTION_COUNTS) or not topics_match):
+            conn.execute("DELETE FROM questions WHERE role_id = ?", (role["role_id"],))
+            conn.execute("DELETE FROM question_patterns WHERE role_id = ?", (role["role_id"],))
+        for question_type, count in SECTION_COUNTS.items():
             exists = conn.execute(
                 "SELECT 1 FROM question_patterns WHERE role_id = ? AND question_type = ?",
                 (role["role_id"], question_type),
@@ -160,7 +193,7 @@ def seed_question_patterns(conn):
                     role["role_id"],
                     question_type,
                     "Easy + Medium",
-                    ", ".join(QUESTION_TOPICS[role["role_slug"]][question_type]),
+                    desired_topics[question_type],
                     count,
                     5,
                 ),
@@ -241,7 +274,7 @@ def list_reports():
 
 
 def question_keywords(topic, role_name, question_type):
-    words = [topic, role_name, question_type, "WITTMANN", "quality", "process"]
+    words = [topic, role_name, question_type, "logical", "verbal", "programming", "java", "python", "c", "c++", "output"]
     return [word.lower() for word in words]
 
 
@@ -283,7 +316,7 @@ def ensure_questions_for_role(role_id):
             JOIN roles r ON r.role_id = q.role_id
             WHERE q.role_id = ?
             ORDER BY
-                CASE q.question_type WHEN 'Technical' THEN 1 WHEN 'HR' THEN 2 ELSE 3 END,
+                CASE q.question_type WHEN 'Aptitude' THEN 1 WHEN 'Programming' THEN 2 ELSE 3 END,
                 q.question_id
             """,
             (role_id,),

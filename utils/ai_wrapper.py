@@ -12,6 +12,8 @@ class AIWrapper:
         self.model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
 
     def generate_question(self, role_name, question_type, topic, index):
+        if question_type in {"Aptitude", "Programming", "Coding"}:
+            return self._local_generate_question(role_name, question_type, topic, index)
         if self.provider == "openai" and self.api_key:
             generated = self._openai_generate_question(role_name, question_type, topic, index)
             if generated:
@@ -32,18 +34,18 @@ class AIWrapper:
 
     def _local_generate_question(self, role_name, question_type, topic, index):
         difficulty = "Easy" if index % 2 else "Medium"
-        if question_type == "Technical":
-            text = f"Explain {topic} for the {role_name} role and give one practical WITTMANN interview example."
+        if question_type == "Aptitude":
+            text = self._aptitude_question(role_name, topic)
             expected = (
-                f"A strong answer explains {topic}, connects it to the {role_name} role, "
-                "and includes a practical example related to WITTMANN quality, customer support, automation, or software work."
+                f"A strong answer solves the {topic} question with clear reasoning, correct grammar or logic, "
+                "and gives the final answer directly."
             )
-        elif question_type == "HR":
-            text = f"How would you show {topic} while working in a WITTMANN {role_name} team?"
-            expected = (
-                f"A strong answer gives a clear personal example of {topic}, shows communication and ownership, "
-                "and explains how the candidate would work professionally with the WITTMANN team."
-            )
+        elif question_type == "Programming":
+            text, expected = self._programming_question(topic)
+            difficulty = "Medium"
+        elif question_type == "Coding":
+            text, expected = self._programming_question(topic)
+            difficulty = "Medium"
         else:
             text = f"Describe a project experience where you used {topic} and how it matches the {role_name} role."
             expected = (
@@ -55,6 +57,35 @@ class AIWrapper:
             "expected_answer": expected,
             "difficulty": difficulty,
         }
+
+    def _aptitude_question(self, role_name, topic):
+        questions = {
+            "Logical Reasoning": "Logical Reasoning: If all quality reports are reviewed and some reviewed reports need retesting, can every retesting report be a quality report? Explain your answer.",
+            "Verbal Ability": "Verbal Ability: Choose the correct sentence and explain why: 'The test cases was executed' or 'The test cases were executed'.",
+            "Programming Aptitude": "Programming Aptitude: If a loop starts at 1 and doubles the value each time until it becomes greater than 32, how many times does the loop run?",
+        }
+        return questions.get(topic, f"{topic}: A candidate must review 24 tasks in 4 hours for the {role_name} role. If 6 tasks are role-specific high-priority tasks, what percentage of total tasks are high priority?")
+
+    def _programming_question(self, topic):
+        questions = {
+            "Java output tracing for strings": (
+                "Programming - Java compiler style question:\n\nCode:\nString s = \"test\";\nSystem.out.println(s.substring(1, 3).toUpperCase());\n\nWhat is the output?\nTest case: input = \"test\"",
+                "The output is ES because substring(1, 3) returns es and toUpperCase converts it to ES.",
+            ),
+            "Python list output tracing": (
+                "Programming - Python compiler style question:\n\nCode:\nnums = [2, 4, 6]\nprint(sum(nums) // len(nums))\n\nWhat is the output?\nTest case: nums = [2, 4, 6]",
+                "The output is 4 because sum(nums) is 12, len(nums) is 3, and integer division gives 4.",
+            ),
+            "C array output tracing": (
+                "Programming - C compiler style question:\n\nCode:\nint a[3] = {1, 2, 3};\nprintf(\"%d\", a[0] + a[2]);\n\nWhat is the output?\nTest case: a = {1, 2, 3}",
+                "The output is 4 because a[0] is 1 and a[2] is 3.",
+            ),
+            "C++ loop output tracing": (
+                "Programming - C++ compiler style question:\n\nCode:\nint total = 0;\nfor (int i = 1; i <= 3; i++) total += i;\ncout << total;\n\nWhat is the output?\nTest case: loop from 1 to 3",
+                "The output is 6 because 1 + 2 + 3 equals 6.",
+            ),
+        }
+        return questions.get(topic, questions["Java output tracing for strings"])
 
     def _openai_generate_question(self, role_name, question_type, topic, index):
         prompt = (
