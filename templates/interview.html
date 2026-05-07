@@ -12,7 +12,13 @@
     <div class="alarm-box" id="alarmBox">
       <strong>Proctoring Alerts</strong>
       <span><span id="violationCount">0</span> suspicious activities detected</span>
+      <span><span id="tabSwitchCount">0</span>/5 tab switches</span>
+      <span><span id="warningCount">0</span>/10 warnings</span>
       <small id="alarmMessage">Monitoring camera and tab focus.</small>
+    </div>
+    <div class="timer-box">
+      <strong id="timerSection">No section started</strong>
+      <span id="timerDisplay">20:00</span>
     </div>
     <div class="candidate-summary">
       <strong>{{ candidate.name }}</strong>
@@ -49,10 +55,11 @@
         </article>
       </section>
 
-      {% set ns = namespace(current_category='') %}
+      {% set ns = namespace(current_category='', section_index=0) %}
       {% for q in questions %}
       {% if ns.current_category != q.category %}
       {% set ns.current_category = q.category %}
+      {% set ns.section_index = 0 %}
       <section class="section-divider test-section" data-section="{{ q.category }}" hidden>
         <p class="eyebrow">Section {{ 1 if q.category == 'Aptitude' else 2 }}</p>
         <h2>{{ q.category }} Round</h2>
@@ -63,9 +70,10 @@
         {% endif %}
       </section>
       {% endif %}
+      {% set ns.section_index = ns.section_index + 1 %}
       <article class="question-card test-section" data-section="{{ q.category }}" data-question-id="{{ q.id }}" hidden>
         <div class="question-meta"><span>{{ q.category }}</span><span>{{ q.difficulty }}</span></div>
-        <h3>{{ loop.index }}. {{ q.question | replace('\n', '<br>') | safe }}</h3>
+        <h3>{{ ns.section_index }}. {{ q.question | replace('\n', '<br>') | safe }}</h3>
         {% if q.options %}
         <div class="option-list" data-answer-group="{{ q.id }}">
           {% for option in q.options %}
@@ -85,6 +93,10 @@
     <section id="results" class="results" hidden></section>
   </section>
 </main>
+<div class="warning-popup" id="warningPopup" hidden>
+  <strong>Warning</strong>
+  <p id="warningPopupMessage"></p>
+</div>
 <script id="questions-data" type="application/json">
   {{ questions | tojson(indent=2) | safe }}
 </script>

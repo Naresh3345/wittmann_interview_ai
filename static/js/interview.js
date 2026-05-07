@@ -5,10 +5,26 @@ const emotionStatus = document.getElementById('emotionStatus');
 const alarmBox = document.getElementById('alarmBox');
 const alarmMessage = document.getElementById('alarmMessage');
 const violationCount = document.getElementById('violationCount');
+const tabSwitchCount = document.getElementById('tabSwitchCount');
+const warningCount = document.getElementById('warningCount');
+const timerSection = document.getElementById('timerSection');
+const timerDisplay = document.getElementById('timerDisplay');
+const warningPopup = document.getElementById('warningPopup');
+const warningPopupMessage = document.getElementById('warningPopupMessage');
 let activeAnswerId = `answer-${window.QUESTIONS[0]?.id || 1}`;
 let proctoringViolations = [];
 let missingFaceFrames = 0;
 let audioContext;
+let warningTotal = 0;
+let tabSwitchTotal = 0;
+let submitted = false;
+let timerInterval;
+let activeSection = '';
+const SECTION_SECONDS = 20 * 60;
+const sectionRemaining = {
+  Aptitude: SECTION_SECONDS,
+  Programming: SECTION_SECONDS,
+};
 
 document.querySelectorAll('[data-start-section]').forEach((button) => {
   button.addEventListener('click', () => startSection(button.dataset.startSection));
@@ -47,17 +63,39 @@ function playAlarmTone() {
   } catch (e) {}
 }
 
-function triggerAlarm(reason) {
+function showWarningPopup(reason) {
+  warningPopupMessage.innerText = reason;
+  warningPopup.hidden = false;
+  setTimeout(() => {
+    warningPopup.hidden = true;
+  }, 3500);
+}
+
+function triggerAlarm(reason, kind = 'warning') {
+  if (submitted) return;
   const event = {
     reason,
+    kind,
     time: new Date().toISOString(),
   };
   proctoringViolations.push(event);
+  warningTotal += 1;
+  if (kind === 'tab-switch') {
+    tabSwitchTotal += 1;
+  }
   violationCount.innerText = proctoringViolations.length;
+  warningCount.innerText = warningTotal;
+  tabSwitchCount.innerText = tabSwitchTotal;
   alarmMessage.innerText = reason;
   alarmBox.classList.add('active');
   playAlarmTone();
+  showWarningPopup(reason);
   setTimeout(() => alarmBox.classList.remove('active'), 3500);
+  if (tabSwitchTotal >= 5) {
+    submitInterview('Auto submitted because tab switching reached the limit.');
+  } else if (warningTotal >= 10) {
+    submitInterview('Auto submitted because warning limit was reached.');
+  }
 }
 
 async function sendFrame() {
@@ -92,16 +130,21 @@ async function sendFrame() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    triggerAlarm('Tab switch detected during interview.');
+  if (document.hidden && activeSection) {
+    triggerAlarm('Tab switch detected during interview.', 'tab-switch');
   }
 });
 
 function startSection(sectionName) {
+  if (submitted) return;
+  activeSection = sectionName;
   document.querySelectorAll('.test-section').forEach((item) => {
     item.hidden = item.dataset.section !== sectionName;
   });
   document.getElementById('sectionLauncher').hidden = false;
+  timerSection.innerText = `${sectionName} Timer`;
+  updateTimerDisplay();
+  startSectionTimer();
   const firstInput = document.querySelector(`.question-card[data-section="${sectionName}"] textarea, .question-card[data-section="${sectionName}"] input`);
   if (firstInput) {
     firstInput.focus();
@@ -110,8 +153,29 @@ function startSection(sectionName) {
 }
 
 window.addEventListener('blur', () => {
-  triggerAlarm('Window focus changed during interview.');
+  if (activeSection) {
+    triggerAlarm('Window focus changed during interview.', 'focus-change');
+  }
 });
+
+function startSectionTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    if (!activeSection || submitted) return;
+    sectionRemaining[activeSection] -= 1;
+    updateTimerDisplay();
+    if (sectionRemaining[activeSection] <= 0) {
+      submitInterview(`${activeSection} time limit ended. Test auto submitted.`);
+    }
+  }, 1000);
+}
+
+function updateTimerDisplay() {
+  const remaining = Math.max(sectionRemaining[activeSection] ?? SECTION_SECONDS, 0);
+  const minutes = String(Math.floor(remaining / 60)).padStart(2, '0');
+  const seconds = String(remaining % 60).padStart(2, '0');
+  timerDisplay.innerText = `${minutes}:${seconds}`;
+}
 
 function updateAnsweredCount() {
   const count = window.QUESTIONS.filter((q) => {
@@ -145,7 +209,13 @@ function startSpeech() {
   recognition.start();
 }
 
-async function submitInterview() {
+async function submitInterview(autoSubmitReason = '') {
+  if (submitted) return;
+  submitted = true;
+  clearInterval(timerInterval);
+  document.querySelectorAll('button, input, textarea').forEach((control) => {
+    control.disabled = true;
+  });
   const answers = {};
   window.QUESTIONS.forEach((q) => {
     const selectedOption = document.querySelector(`input[name="answer-${q.id}"]:checked`);
@@ -155,7 +225,7 @@ async function submitInterview() {
   const res = await fetch('/api/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ answers, proctoring_violations: proctoringViolations }),
+    body: JSON.stringify({ answers, proctoring_violations: proctoringViolations, auto_submit_reason: autoSubmitReason }),
   });
   const data = await res.json();
   renderResults(data);

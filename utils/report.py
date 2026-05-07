@@ -27,6 +27,8 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
     story.append(Paragraph(f"Detected Frames: {face_summary.get('detected_frames', 0)} / {face_summary.get('total_frames', 0)}", styles["Normal"]))
     violations = face_summary.get("proctoring_violations", [])
     story.append(Paragraph(f"Proctoring Alerts: {len(violations)}", styles["Normal"]))
+    if face_summary.get("auto_submit_reason"):
+        story.append(Paragraph(f"Auto Submit Reason: {face_summary.get('auto_submit_reason')}", styles["Normal"]))
     story.append(Paragraph(f"Shortlist Result: {face_summary.get('shortlist_status', 'Pending')}", styles["Heading2"]))
     story.append(Paragraph(f"Reason: {face_summary.get('shortlist_reason', '')}", styles["Normal"]))
     story.append(Spacer(1, 12))

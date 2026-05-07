@@ -316,6 +316,7 @@ def submit_interview():
     candidate_name = candidate.get("name") or payload.get("candidate_name", "Candidate")
     answers = payload.get("answers", {})
     proctoring_violations = payload.get("proctoring_violations", [])
+    auto_submit_reason = payload.get("auto_submit_reason", "")
     questions = ensure_questions_for_role(session.get("role_id")) if session.get("role_id") else load_questions()
 
     results = []
@@ -342,6 +343,7 @@ def submit_interview():
         **stats,
         "confidence_index": round(((stats.get("detected_frames", 0) / total) * 55) + ((stats.get("stable_frames", 0) / total) * 30) + ((stats.get("smile_frames", 0) / total) * 15), 2),
         "proctoring_violations": proctoring_violations,
+        "auto_submit_reason": auto_submit_reason,
     }
     shortlist_status, shortlist_reason = shortlist_candidate(overall, proctoring_violations)
     face_summary["shortlist_status"] = shortlist_status
