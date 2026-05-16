@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="role-layout">
+  <section class="role-header">
+    <p class="eyebrow">Step 2</p>
+    <h1>Select Job Role</h1>
+    <p class="subtitle">{{ candidate.name }} can now choose the interview domain. After role selection, the browser will test camera, microphone, and browser requirements before starting.</p>
+  </section>
+
+  <form method="post" class="role-grid" id="roleForm">
+    {% for role in roles %}
+    <label class="role-card">
+      <input type="radio" name="role_id" value="{{ role.role_id }}" required>
+      <span>{{ role.role_name }}</span>
+      <small>Section 1: Aptitude | Section 2: Programming output tests</small>
+    </label>
+    {% endfor %}
+    <div class="compatibility-panel" id="compatibilityPanel" hidden>
+      <strong>System Compatibility</strong>
+      <ul id="compatibilityList"></ul>
+      <p id="compatibilityMessage"></p>
+      <div class="lan-camera-guide" id="lanCameraGuide" hidden>
+        <strong>Enable Camera on This LAN System</strong>
+        <ol>
+          <li>Open <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>.</li>
+          <li>Paste this address: <code id="lanOriginValue"></code></li>
+          <li>Set the flag to <strong>Enabled</strong>, then click <strong>Relaunch</strong>.</li>
+          <li>Open this page again and allow camera and microphone access.</li>
+        </ol>
+        <button class="btn ghost compact" id="copyLanOriginButton" type="button">Copy Site Address</button>
+      </div>
+    </div>
+    <button class="btn primary role-submit" id="startRoleButton" type="submit">Test Camera & Mic</button>
+  </form>
+</main>
+<script>
+  const roleForm = document.getElementById('roleForm');
+  const panel = document.getElementById('compatibilityPanel');
+  const list = document.getElementById('compatibilityList');
+  const message = document.getElementById('compatibilityMessage');
+  const startButton = document.getElementById('startRoleButton');
+  const lanCameraGuide = document.getElementById('lanCameraGuide');
+  const lanOriginValue = document.getElementById('lanOriginValue');
+  const copyLanOriginButton = document.getElementById('copyLanOriginButton');
+
+  const isLanHttp = !window.isSecureContext && location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+  const lanOrigin = location.origin;
+
+  if (lanOriginValue) {
+    lanOriginValue.textContent = lanOrigin;
+  }
+
+  copyLanOriginButton?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(lanOrigin);
+      copyLanOriginButton.textContent = 'Copied';
+    } catch (error) {
+      copyLanOriginButton.textContent = 'Copy Failed';
+    }
+    setTimeout(() => {
+      copyLanOriginButton.textContent = 'Copy Site Address';
+    }, 1800);
+  });
+
+  function addCheck(label, passed) {
+    const item = document.createElement('li');
+    item.className = passed ? 'check-pass' : 'check-fail';
+    item.textContent = `${passed ? 'Pass' : 'Fail'} - ${label}`;
+    list.appendChild(item);
+    return passed;
+  }
+
+  function addWarning(label) {
+    const item = document.createElement('li');
+    item.className = 'check-fail';
+    item.textContent = `Warning - ${label}`;
+    list.appendChild(item);
+  }
+
+  async function runCompatibilityCheck() {
+    panel.hidden = false;
+    lanCameraGuide.hidden = true;
+    list.innerHTML = '';
+    message.textContent = 'Testing camera, microphone, and browser readiness...';
+    startButton.disabled = true;
+    startButton.textContent = 'Testing Camera & Mic...';
+
+    const requiredChecks = [
+      addCheck('JavaScript is enabled', true),
+      addCheck('Page visibility monitoring is available', typeof document.hidden !== 'undefined'),
+      addCheck('Modern browser storage is available', Boolean(window.localStorage)),
+      addCheck('Screen size is suitable for interview', window.innerWidth >= 900 && window.innerHeight >= 600),
+    ];
+    const mediaChecks = [
+      addCheck('Camera and microphone API is available', Boolean(navigator.mediaDevices?.getUserMedia)),
+    ];
+
+    let stream;
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        mediaChecks.push(addCheck('Camera permission granted and working', stream.getVideoTracks().length > 0));
+        mediaChecks.push(addCheck('Microphone permission granted and working', stream.getAudioTracks().length > 0));
+      } catch (error) {
+        mediaChecks.push(addCheck('Camera permission granted and working', false));
+        mediaChecks.push(addCheck('Microphone permission granted and working', false));
+      } finally {
+        if (stream) {
+          stream.getTracks().forEach((track) => track.stop());
+        }
+      }
+    } else if (isLanHttp) {
+      addWarning('Camera and microphone are blocked on LAN HTTP. Apply the Chrome secure-origin setting shown below, or continue without camera monitoring.');
+      lanCameraGuide.hidden = false;
+    }
+
+    const requiredPassed = requiredChecks.every(Boolean);
+    const mediaPassed = mediaChecks.every(Boolean);
+    const canStart = requiredPassed;
+    if (requiredPassed && !mediaPassed && isLanHttp) {
+      lanCameraGuide.hidden = false;
+    }
+    message.textContent = requiredPassed
+      ? (mediaPassed ? 'All requirements are satisfied. Starting interview...' : 'Camera is blocked by Chrome on LAN HTTP. Starting interview without camera monitoring.')
+      : 'Requirements failed. Please use a suitable browser and screen before starting.';
+    startButton.disabled = false;
+    startButton.textContent = canStart ? (mediaPassed ? 'Starting Interview...' : 'Starting Without Camera...') : 'Test Camera & Mic Again';
+    return canStart;
+  }
+
+  roleForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const selectedRole = roleForm.querySelector('input[name="role_id"]:checked');
+    if (!selectedRole) {
+      roleForm.reportValidity();
+      return;
+    }
+    const passed = await runCompatibilityCheck();
+    if (passed) {
+      roleForm.submit();
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="interview-layout">
+  <aside class="camera-panel">
+    <h2>Candidate Monitor</h2>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="snapshot" width="320" height="240" hidden></canvas>
+    <div class="status-box">
+      <span id="faceStatus">Camera starting...</span>
+      <small id="emotionStatus">Emotion: Waiting</small>
+    </div>
+    <div class="lan-camera-guide compact-guide" id="lanCameraGuide" hidden>
+      <strong>Enable camera on LAN</strong>
+      <ol>
+        <li>Open <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>.</li>
+        <li>Paste <code id="lanOriginValue"></code>.</li>
+        <li>Set it to <strong>Enabled</strong>, relaunch Chrome, then reopen this link.</li>
+      </ol>
+      <button class="btn ghost compact" id="copyLanOriginButton" type="button">Copy Site Address</button>
+    </div>
+    <div class="alarm-box" id="alarmBox">
+      <strong>Proctoring Alerts</strong>
+      <span><span id="violationCount">0</span> suspicious activities detected</span>
+      <span><span id="tabSwitchCount">0</span>/5 tab switches</span>
+      <span><span id="warningCount">0</span>/10 warnings</span>
+      <small id="alarmMessage">Monitoring camera and tab focus.</small>
+    </div>
+    <div class="timer-box">
+      <strong id="timerSection">No section started</strong>
+      <span id="timerDisplay">20:00</span>
+    </div>
+    <div class="candidate-summary">
+      <strong>{{ candidate.name }}</strong>
+      <span>{{ candidate.email }}</span>
+      <span>{{ candidate.phone }}</span>
+      <small>{{ role_name }}</small>
+    </div>
+    <button class="btn ghost full" onclick="startSpeech()">Speak Answer</button>
+    <button class="btn primary full" onclick="submitInterview()">Submit Interview</button>
+  </aside>
+
+  <section class="question-panel">
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">{{ company_name }} Focused Assessment</p>
+        <h1>{{ role_name }} Interview</h1>
+      </div>
+      <div class="progress"><span id="answeredCount">0</span>/{{ questions|length }} answered</div>
+    </div>
+
+    <div id="questions">
+      <section class="section-launcher" id="sectionLauncher">
+        <article class="test-section-card">
+          <p class="eyebrow">Section 1</p>
+          <h2>Aptitude</h2>
+          <p>Logical Reasoning, Verbal Ability, Programming Aptitude, and role-related aptitude.</p>
+          <button class="btn primary" type="button" data-start-section="Aptitude">Start Test</button>
+        </article>
+        <article class="test-section-card">
+          <p class="eyebrow">Section 2</p>
+          <h2>Programming</h2>
+          <p>Java, Python, C, and C++ compiler-style output questions with test cases.</p>
+          <button class="btn primary" type="button" data-start-section="Programming">Start Test</button>
+        </article>
+      </section>
+
+      {% set ns = namespace(current_category='', section_index=0) %}
+      {% for q in questions %}
+      {% if ns.current_category != q.category %}
+      {% set ns.current_category = q.category %}
+      {% set ns.section_index = 0 %}
+      <section class="section-divider test-section" data-section="{{ q.category }}" hidden>
+        <p class="eyebrow">Section {{ 1 if q.category == 'Aptitude' else 2 }}</p>
+        <h2>{{ q.category }} Round</h2>
+        {% if q.category == 'Aptitude' %}
+        <p>Logical Reasoning, Verbal Ability, Programming Aptitude, and role-related aptitude.</p>
+        {% else %}
+        <p>Give the exact output for each compiler-style test case.</p>
+        {% endif %}
+      </section>
+      {% endif %}
+      {% set ns.section_index = ns.section_index + 1 %}
+      <article class="question-card test-section" data-section="{{ q.category }}" data-question-id="{{ q.id }}" hidden>
+        <div class="question-meta"><span>{{ q.category }}</span><span>{{ q.difficulty }}</span></div>
+        <h3>{{ ns.section_index }}. {{ q.question | replace('\n', '<br>') | safe }}</h3>
+        {% if q.options %}
+        <div class="option-list" data-answer-group="{{ q.id }}">
+          {% for option in q.options %}
+          <label class="option-row">
+            <input type="radio" name="answer-{{ q.id }}" value="{{ option }}" onchange="updateAnsweredCount()">
+            <span>{{ option }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        {% else %}
+        <textarea id="answer-{{ q.id }}" oninput="updateAnsweredCount()" placeholder="Type your final answer here..."></textarea>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+
+    <section id="results" class="results" hidden></section>
+  </section>
+</main>
+<div class="warning-popup" id="warningPopup" hidden>
+  <strong>Warning</strong>
+  <p id="warningPopupMessage"></p>
+</div>
+<script id="questions-data" type="application/json">
+  {{ questions | tojson(indent=2) | safe }}
+</script>
+<script>
+  window.QUESTIONS = JSON.parse(document.getElementById('questions-data').textContent);
+</script>
+<script src="{{ url_for('static', filename='js/interview.js') }}"></script>
+{% endblock %}

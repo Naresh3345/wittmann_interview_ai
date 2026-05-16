@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="completion-layout">
+  <section class="completion-panel {{ 'rejected' if result.status == 'rejected' else 'submitted' }}">
+    <p class="eyebrow">{{ role_name or 'Interview' }} Result</p>
+    <h1>{{ result.title }}</h1>
+    <p class="subtitle">{{ result.message }}</p>
+
+    <div class="completion-summary">
+      <div>
+        <span>Candidate</span>
+        <strong>{{ candidate.name or 'Candidate' }}</strong>
+      </div>
+      <div>
+        <span>Status</span>
+        <strong>{{ 'Rejected' if result.status == 'rejected' else 'Submitted' }}</strong>
+      </div>
+      <div>
+        <span>Warnings</span>
+        <strong>{{ result.warning_count }}</strong>
+      </div>
+    </div>
+
+    {% if result.auto_submit_reason %}
+    <p class="notice {{ 'error' if result.status == 'rejected' else 'warning' }}">{{ result.auto_submit_reason }}</p>
+    {% endif %}
+
+    <a class="btn primary" href="{{ url_for('index') }}">Back to Login</a>
+  </section>
+</main>
+{% endblock %}

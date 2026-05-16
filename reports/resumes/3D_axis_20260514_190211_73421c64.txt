@@ -1,0 +1,23 @@
+***** 3D Axis Teach edit page *****
+
+Move Tab
+
+Absolute : 0 is the initial reference
+curve : axis moves in curved and smooth path.
+relative : axis move from current position of the axis.
+relative curve : axis moves in curved path from current position
+Move to counter : axis moves according to the counter values.
+
+Movemnet Properties
+
+3D Velocity limit : -V3D controls the overall movement speed of the robot path.
+					-V3D controls the combined total speed.
+
+	-Even if the Vmax, Vabs, Aabs value is high,
+	 V3D can still limit the final path speed.
+	 
+Radius 3D : Radius 3D defines the area where the robot creates a smooth path
+			When robot changes direction: It normally makes a sharp turn
+			With Radius 3D: Robot starts smoothing the movement inside a defined area
+			
+

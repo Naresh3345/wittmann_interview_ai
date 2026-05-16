@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+.certs/
+data/*.db
+reports/*.pdf
+venv/

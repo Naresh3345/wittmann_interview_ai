@@ -1,0 +1,35 @@
+1. Count of Specific Digit
+
+Problem:
+Write a program to count how many times a specific digit appears in a given number.
+
+Example:
+Input: Number = 45644345, Digit = 4
+Output: 4 appears 4 times
+
+2. Find Unique Digits
+
+Problem:
+Write a program to find all unique (distinct) digits in a given number.
+
+Example:
+Input: 45644345
+Output: Unique digits: 4, 5, 6, 3
+
+3. Find LCM of Two Numbers
+
+Problem:
+Write a program to find the Least Common Multiple (LCM) of two given numbers.
+
+Example:
+Input: 12, 18
+Output: LCM = 36
+
+4. Find HCF of Two Numbers
+
+Problem:
+Write a program to find the Highest Common Factor (HCF) (also called GCD) of two given numbers.
+
+Example:
+Input: 12, 18
+Output: HCF = 6

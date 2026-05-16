@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="login-layout">
+  <section class="login-copy">
+    <p class="eyebrow">Step 1</p>
+    <h1>Upload Resume</h1>
+    <p class="subtitle">Upload the candidate resume. The system extracts name, email ID, and phone number, then sends a 5-minute interview test link to the extracted email address.</p>
+  </section>
+
+  <section class="form-panel">
+    {% if error %}
+    <p class="notice error">{{ error }}</p>
+    {% endif %}
+
+    {% if invite %}
+    <div class="candidate-summary">
+      <strong>{{ invite.name }}</strong>
+      <span>{{ invite.email }}</span>
+      <span>{{ invite.phone }}</span>
+      <small>Resume saved to reports. Link expires at {{ invite.expires_at }}.</small>
+    </div>
+    {% if invite.sent %}
+    <p class="notice success">Test link sent to the candidate email ID.</p>
+    {% elif invite.mail_status == 'not_configured' %}
+    <p class="notice warning">SMTP settings are incomplete, so email was not sent. Development test link:</p>
+    <a class="table-link" href="{{ invite.test_link }}">{{ invite.test_link }}</a>
+    {% else %}
+    <p class="notice warning">SMTP login failed, so email was not sent. Check the Gmail App Password in .env. Development test link:</p>
+    <a class="table-link" href="{{ invite.test_link }}">{{ invite.test_link }}</a>
+    {% if invite.mail_error %}
+    <p class="form-hint">{{ invite.mail_error }}</p>
+    {% endif %}
+    {% endif %}
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" class="candidate-form" id="candidateForm">
+      <label for="resume">Resume</label>
+      <input id="resume" name="resume" type="file" accept=".pdf,.docx,.txt" required>
+      <p class="form-hint" id="resumeParseStatus">Choose a resume to auto-fill candidate details.</p>
+
+      <p class="form-hint">Optional fallback fields are used only if the resume parser cannot read a value.</p>
+
+      <label for="name">Name</label>
+      <input id="name" name="name" value="{{ form_values.name }}" placeholder="Auto-filled from resume when possible">
+
+      <label for="email">Email ID</label>
+      <input id="email" name="email" type="email" value="{{ form_values.email }}" placeholder="candidate@example.com">
+
+      <label for="phone">Phone Number</label>
+      <input id="phone" name="phone" type="tel" value="{{ form_values.phone }}" placeholder="Enter phone number">
+
+      <button class="btn primary full" type="submit">Upload & Send Test Link</button>
+    </form>
+  </section>
+</main>
+<section class="features" id="features">
+  <article><h3>Resume Upload</h3><p>The uploaded resume is stored under reports and linked with the candidate record.</p></article>
+  <article><h3>Auto Extraction</h3><p>Name, email ID, and phone number are detected from PDF, DOCX, or TXT resumes.</p></article>
+  <article><h3>Email Test Link</h3><p>The candidate receives a one-time test link at the extracted email address.</p></article>
+  <article><h3>5 Minute Expiry</h3><p>If the test link is not opened within 5 minutes, it fails automatically.</p></article>
+</section>
+<script>
+  const resumeInput = document.getElementById('resume');
+  const candidateForm = document.getElementById('candidateForm');
+  const nameInput = document.getElementById('name');
+  const emailInput = document.getElementById('email');
+  const phoneInput = document.getElementById('phone');
+  const parseStatus = document.getElementById('resumeParseStatus');
+  let parsedCurrentFile = false;
+
+  async function parseSelectedResume() {
+    const file = resumeInput.files?.[0];
+    if (!file) return false;
+
+    parseStatus.textContent = 'Reading resume details...';
+    const formData = new FormData();
+    formData.append('resume', file);
+
+    try {
+      const response = await fetch('/api/parse-resume', {
+        method: 'POST',
+        body: formData,
+      });
+      const details = await response.json();
+      if (!response.ok) {
+        throw new Error(details.error || 'Could not read resume.');
+      }
+
+      if (details.name) nameInput.value = details.name;
+      if (details.email) emailInput.value = details.email;
+      if (details.phone) phoneInput.value = details.phone;
+
+      const missing = ['name', 'email', 'phone'].filter((field) => !details[field]);
+      parseStatus.textContent = missing.length
+        ? `Auto-filled available details. Please type missing ${missing.join(', ')}.`
+        : 'Candidate details auto-filled from resume.';
+      parsedCurrentFile = true;
+      return true;
+    } catch (error) {
+      parseStatus.textContent = error.message;
+      return false;
+    }
+  }
+
+  resumeInput?.addEventListener('change', async () => {
+    parsedCurrentFile = false;
+    await parseSelectedResume();
+  });
+
+  candidateForm?.addEventListener('submit', async (event) => {
+    const needsDetails = !nameInput.value.trim() || !emailInput.value.trim() || !phoneInput.value.trim();
+    if (needsDetails && !parsedCurrentFile) {
+      event.preventDefault();
+      const parsed = await parseSelectedResume();
+      const ready = parsed && nameInput.value.trim() && emailInput.value.trim() && phoneInput.value.trim();
+      if (ready) {
+        candidateForm.submit();
+      }
+    }
+  });
+</script>
+{% endblock %}

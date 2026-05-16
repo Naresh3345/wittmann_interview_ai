@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "category": "Aptitude",
+    "difficulty": "Easy",
+    "question": "Logical Reasoning: If all plastics are materials and some materials are recyclable, which conclusion is valid?",
+    "options": ["A. All plastics are recyclable", "B. Some materials are plastics", "C. No material is recyclable", "D. All recyclable items are plastics"],
+    "keywords": ["logical", "reasoning", "option"],
+    "correct_answer": "B. Some materials are plastics",
+    "ideal_answer": "B. Some materials are plastics"
+  },
+  {
+    "id": 2,
+    "category": "Aptitude",
+    "difficulty": "Easy",
+    "question": "Verbal Ability: Choose the grammatically correct sentence.",
+    "options": ["A. The test cases was executed", "B. The test cases were executed", "C. The test cases is executed", "D. The test cases has executed"],
+    "keywords": ["verbal", "grammar", "option"],
+    "correct_answer": "B. The test cases were executed",
+    "ideal_answer": "B. The test cases were executed"
+  },
+  {
+    "id": 3,
+    "category": "Programming",
+    "difficulty": "Easy",
+    "question": "Programming - Java compiler style question:\n\nCode:\nString s = \"test\";\nSystem.out.println(s.substring(1, 3).toUpperCase());\n\nWhat is the output?\nTest case: input = \"test\"",
+    "options": [],
+    "keywords": ["java", "output"],
+    "correct_answer": "ES",
+    "ideal_answer": "ES"
+  }
+]

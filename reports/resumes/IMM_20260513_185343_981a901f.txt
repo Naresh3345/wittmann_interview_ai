@@ -1,0 +1,7 @@
+***** IMM *****
+
+-Robot and IMM communicate using signals
+-communication standard used : EUROMAP 67
+-Robot sends permission/request signals
+But:
+IMM itself actually performs the movement

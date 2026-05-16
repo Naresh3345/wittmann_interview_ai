@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="database-layout">
+  <section class="database-header">
+    <div>
+      <p class="eyebrow">Admin Database Viewer</p>
+      <h1>SQLite Tables</h1>
+      <p class="db-path">{{ db_path }}</p>
+    </div>
+    <a class="btn ghost" href="/">Back to Login</a>
+  </section>
+
+  {% for table in tables %}
+  <section class="db-table-card">
+    <div class="db-table-title">
+      <h2>{{ table.name }}</h2>
+      <span>{{ table.rows|length }} rows shown</span>
+    </div>
+
+    {% if table.rows %}
+    <div class="db-table-scroll">
+      <table class="db-table">
+        <thead>
+          <tr>
+            {% for column in table.columns %}
+            <th>{{ column }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in table.rows %}
+          <tr>
+            {% for column in table.columns %}
+            <td>{{ row[column] }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty-table">No data stored yet.</p>
+    {% endif %}
+  </section>
+  {% endfor %}
+</main>
+{% endblock %}

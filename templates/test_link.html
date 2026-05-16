@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="completion-layout">
+  <section class="completion-panel rejected">
+    <p class="eyebrow">Interview Link</p>
+    <h1>{{ title }}</h1>
+    <p class="subtitle">{{ message }}</p>
+    <a class="btn primary" href="{{ url_for('index') }}">Upload Resume Again</a>
+  </section>
+</main>
+{% endblock %}

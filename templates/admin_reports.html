@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="database-layout">
+  <section class="database-header">
+    <div>
+      <p class="eyebrow">Admin Reports</p>
+      <h1>Candidate Interview Reports</h1>
+      <p class="db-path">Only admin can view and download generated PDF reports.</p>
+    </div>
+    <a class="btn ghost" href="/admin/database?key={{ admin_key }}">Database</a>
+  </section>
+
+  <section class="db-table-card">
+    {% if reports %}
+    <div class="db-table-scroll">
+      <table class="db-table">
+        <thead>
+          <tr>
+            <th>Candidate</th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th>Role</th>
+            <th>Date</th>
+            <th>Score</th>
+            <th>Shortlist</th>
+            <th>Status</th>
+            <th>Resume</th>
+            <th>Report</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for report in reports %}
+          <tr>
+            <td>{{ report.name }}</td>
+            <td>{{ report.email }}</td>
+            <td>{{ report.phone }}</td>
+            <td>{{ report.role_name }}</td>
+            <td>{{ report.date }}</td>
+            <td>{{ report.total_score }}%</td>
+            <td>
+              <strong>{{ report.shortlist_status or 'Pending' }}</strong><br>
+              <small>{{ report.shortlist_reason or '' }}</small>
+            </td>
+            <td>{{ report.status }}</td>
+            <td>
+              {% if report.resume_path %}
+              <a class="table-link" href="/download-resume?key={{ admin_key }}&path={{ report.resume_path | urlencode }}">Download Resume</a>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+            <td>
+              <a class="table-link" href="/download-report?key={{ admin_key }}&path={{ report.report_path | urlencode }}">Download PDF</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty-table">No reports generated yet.</p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

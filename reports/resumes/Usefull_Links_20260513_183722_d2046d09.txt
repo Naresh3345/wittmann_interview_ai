@@ -1,0 +1,105 @@
+Jenkins daily build (R9 offline editor)
+=================== ==================== 
+http://10.90.2.30:8080/view/R9/job/R9%20Deployment%20on%20WIKU1/ws/InstallShield/LastBuild/
+
+Jenkins R9 Master
+==================
+http://10.90.2.30:8080/view/R9%20Pipe%20on%20WIKU1/job/R9%20Deployment%20on%20WIKU1/ws/Testbench/LastBuild/Controller/
+
+Jenkins R9 GUI 
+==============
+http://10.90.2.30:8080/view/R9%20Pipe%20on%20WIKU1/job/R9%20Deployment%20on%20WIKU1/ws/Testbench/LastBuild/GUI/
+
+Jenkins R9com-x package  
+======= ===============
+http://10.90.2.30:8080/job/R9%20Package%20Creator%20on%20WIKU1/ws/LastBuild/Simulation_Development/
+
+Jenkins Wittconf
+======= ========
+http://10.90.2.30:8080/job/WittConf/ws/LastBuild/Setup/Release%201/DiskImages/DISK1/
+
+Jenkins Wittmann Control Room
+======= =====================
+http://10.90.2.30:8080/view/W4.0%20Control%20Room/job/W4.0%20Control%20Room%20InstallShield%20Release/ws/LastBuild/
+
+Jenkins Wittmann Control Room seperate GUI and Master
+======= ===================== =======================
+http://10.90.2.30:8080/view/W4.0%20Control%20Room/job/W4.0%20Control%20Room%20Application%20and%20Teachbox%20Release/ws/LastBuild/
+
+Jenkins IMM Twin Application
+======= ====================
+http://10.90.2.30:8080/view/Wittmann%20Tools/job/Tools/view/IMM%20Emulator/job/IMM%20Emulator%20GUI%20Release/ws/LastBuild/Win32/
+
+Jenkins IMM Twin Master
+======= ==================
+http://10.90.2.30:8080/view/Wittmann%20Tools/job/Tools/view/IMM%20Emulator/job/IMM%20Emulator%20Master%20Win32%20Release/ws/LastBuild/
+
+Jenkins IMM Twin Install
+======= ======== =======
+http://10.90.2.30:8080/view/Wittmann%20Tools/job/Tools/view/IMM%20Emulator/job/IMM%20Emulator%20InstallShield/ws/LastBuild/
+
+Jenkins Oscilloscope
+====================
+http://10.90.2.30:8080/job/Wittmann%204.0%20Oscilloscope/ws/Testbench/LastBuild/net472/
+
+
+
+Jira link for issue
+====================
+https://wittmann-group.atlassian.net/jira/software/c/projects/SMT/issues/?jql=type%20%3D%20Bug%20AND%20project%20%3D%20%22R9%20Manual%20Tests%22%20ORDER%20BY%20created%20DESC
+
+
+Jira link for MT project
+========================
+https://wittmann-group.atlassian.net/jira/software/c/projects/WMT/boards/131?assignee=712020%3A9f2b8b5a-1626-4691-9a00-2ec69b260fcb
+
+
+Confluence link
+================
+https://wittmann-group.atlassian.net/wiki/home/recent
+
+Confluence link for bug structure
+=================================
+https://wittmann-group.atlassian.net/wiki/spaces/SIB/pages/21408326/Bug+structure
+
+Confluence link for User Guide
+================================
+https://wittmann-group.atlassian.net/wiki/spaces/SIB/pages/21389899/Guides+MT
+
+Confluence link to update the Robot for weekly check
+====================================================
+https://wittmann-group.atlassian.net/wiki/spaces/SIB/pages/21411707/To+do+list+for+updating+the+software+and+daily+verification+if+the+software+works+correctly
+
+Confluence link for User Administration
+========================================
+http://10.90.1.34:8090/display/SIB/R9+User+Administration
+
+
+Bitbucket
+=========
+https://bitbucket.org/wittmann-group/workspace/overview
+
+=======================================================================================================================================================================================
+
+OLD JENKINS LINK:
+=================
+InstallShield
+--------------
+http://10.90.2.30:8080/view/R9/job/R9%20Robot%20Installshield/ws/AllBuilds_prerelease/VER_9_94/20241218_2358_prerelease/
+
+Controller
+----------
+http://10.90.2.30:8080/view/R9%20Master/job/R9%20Master%20WIN32%20Release%20Simulation/ws/AllBuilds_prerelease/VER_9_94/20241218_2356_prerelease/
+
+GUI
+----
+http://10.90.2.30:8080/view/R9/job/R9%20GUI/ws/AllBuilds_prerelease/VER_9_94/20241218_2115_prerelease/
+
+GUI SST
+-------
+http://10.90.2.30:8080/job/R9%20GUI%20ReleaseDevCertForSST%20on%20JB1/ws/AllBuilds_prerelease/VER_9_94/20250123_1033_prerelease/
+
+Com-X Master
+-------------
+http://10.90.2.30:8080/view/R9/job/R9%20Package%20Creator/ws/AllBuilds_prerelease/VER_9_94/20241218_23_prerelease/Development_Simulation/
+
