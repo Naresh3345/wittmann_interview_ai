@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -192,6 +193,16 @@ def init_db():
                 FOREIGN KEY (question_id) REFERENCES questions(question_id)
             );
 
+            CREATE TABLE IF NOT EXISTS interview_questions (
+                assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                interview_id TEXT NOT NULL,
+                question_key TEXT NOT NULL,
+                display_order INTEGER NOT NULL,
+                question_snapshot_json TEXT NOT NULL,
+                UNIQUE(interview_id, question_key),
+                FOREIGN KEY (interview_id) REFERENCES interviews(interview_id)
+            );
+
             CREATE TABLE IF NOT EXISTS test_links (
                 token TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -318,6 +329,34 @@ def create_interview(interview_id, user_id, role_id):
         )
 
 
+def save_interview_questions(interview_id, questions):
+    with get_db() as conn:
+        conn.execute("DELETE FROM interview_questions WHERE interview_id = ?", (interview_id,))
+        for index, question in enumerate(questions, start=1):
+            conn.execute(
+                """
+                INSERT INTO interview_questions
+                    (interview_id, question_key, display_order, question_snapshot_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (interview_id, str(question["id"]), index, json.dumps(question)),
+            )
+
+
+def load_interview_questions(interview_id):
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT question_snapshot_json
+            FROM interview_questions
+            WHERE interview_id = ?
+            ORDER BY display_order
+            """,
+            (interview_id,),
+        ).fetchall()
+    return [json.loads(row["question_snapshot_json"]) for row in rows]
+
+
 def complete_interview(interview_id, total_score, report_path, shortlist_status, shortlist_reason):
     with get_db() as conn:
         conn.execute(
@@ -342,7 +381,7 @@ def save_candidate_answers(interview_id, results):
                 """,
                 (
                     interview_id,
-                    result["question"]["id"],
+                    str(result["question"]["id"]),
                     result["answer"],
                     result["score"]["total_score"],
                     result["feedback"],

@@ -27,15 +27,17 @@ from utils.database import (
     create_test_link,
     create_interview,
     create_user,
-    ensure_questions_for_role,
     get_test_link,
     init_db,
+    load_interview_questions,
     list_reports,
     list_roles,
     load_database_snapshot,
     mark_test_link_used,
     save_candidate_answers,
+    save_interview_questions,
 )
+from utils.question_bank import ensure_question_bank_indexes, select_questions_for_role
 from utils.report import generate_pdf_report
 from werkzeug.utils import secure_filename
 
@@ -63,6 +65,10 @@ smile_cascade = cv2.CascadeClassifier(os.path.join(haar_folder, "haarcascade_smi
 def load_questions():
     with open(DATA_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def get_role_by_id(role_id):
+    return next((role for role in list_roles() if role["role_id"] == role_id), None)
 
 
 def create_otp():
@@ -449,7 +455,6 @@ def select_role():
         if selected:
             session["role_id"] = role_id
             session["role_name"] = selected["role_name"]
-            ensure_questions_for_role(role_id)
             return redirect(url_for("interview"))
     return render_template(
         "roles.html",
@@ -466,11 +471,15 @@ def interview():
     if "role_id" not in session:
         return redirect(url_for("select_role"))
 
-    questions = ensure_questions_for_role(session["role_id"])
     interview_id = str(uuid.uuid4())
     session["interview_id"] = interview_id
     session["face_stats"] = {"total_frames": 0, "detected_frames": 0, "smile_frames": 0, "stable_frames": 0}
     create_interview(interview_id, session["user_id"], session["role_id"])
+    role = get_role_by_id(session["role_id"])
+    if not role:
+        return redirect(url_for("select_role"))
+    questions = select_questions_for_role(role["role_slug"])
+    save_interview_questions(interview_id, questions)
 
     return render_template(
         "interview.html",
@@ -507,8 +516,8 @@ def admin_reports():
 
 @app.route("/api/questions")
 def api_questions():
-    if "role_id" in session:
-        return jsonify(ensure_questions_for_role(session["role_id"]))
+    if session.get("interview_id"):
+        return jsonify(load_interview_questions(session["interview_id"]))
     return jsonify(load_questions())
 
 
@@ -577,7 +586,7 @@ def submit_interview():
     answers = payload.get("answers", {})
     proctoring_violations = payload.get("proctoring_violations", [])
     auto_submit_reason = payload.get("auto_submit_reason", "")
-    questions = ensure_questions_for_role(session.get("role_id")) if session.get("role_id") else load_questions()
+    questions = load_interview_questions(session.get("interview_id")) if session.get("interview_id") else load_questions()
 
     results = []
     for question in questions:
@@ -672,6 +681,7 @@ def download_resume():
 
 
 init_db()
+ensure_question_bank_indexes()
 
 
 if __name__ == "__main__":
