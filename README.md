@@ -16,7 +16,7 @@ A professional final-year B.Tech AI & Data Analytics project for a company-focus
 
 - Python
 - Flask
-- MongoDB question bank
+- PostgreSQL database and live question bank
 - OpenCV
 - Scikit-learn
 - HTML, CSS, JavaScript
@@ -108,69 +108,49 @@ ENABLE_HTTPS=0
 - The system works without camera also; only text/NLP scoring will be used.
 - Reports are saved in the `reports` folder.
 
-## MongoDB Question Bank
+## PostgreSQL Database And Question Bank
 
-The live question bank is stored in MongoDB so HR/admin can edit questions directly in MongoDB Compass without changing application code.
+All application data and the live question bank are stored in PostgreSQL. HR/admin can edit questions directly in the separate HR portal, pgAdmin, DBeaver, or SQL while the Flask app is running.
 
 ### Local setup
 
 Add these values to `.env`:
 
 ```text
-MONGODB_URI=mongodb://localhost:27017/
-MONGODB_DB_NAME=wittmann_interview_ai
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/wittmann_interview_ai
 ```
 
-Create the starter collections and indexes:
+Create the starter tables and seed the editable question bank:
 
 ```bash
-python scripts/seed_mongodb_starter_bank.py
+python scripts/seed_postgres_starter_bank.py
 ```
 
 To import your own reviewed JSON questions:
 
 ```bash
-python scripts/import_mongodb_questions.py
+python scripts/import_postgres_questions.py
 ```
 
-To make the role and pattern metadata visible in MongoDB Compass:
+To refresh the role and pattern metadata:
 
 ```bash
-python scripts/sync_question_metadata_to_mongodb.py
+python scripts/sync_question_metadata_to_postgres.py
 ```
 
-This creates:
-
-```text
-roles
-question_patterns
-```
-
-If you also want a read-only mirror of the current SQLite operational tables inside Compass for visibility:
+To migrate existing local SQLite operational data into PostgreSQL:
 
 ```bash
-python scripts/mirror_sqlite_to_mongodb.py
+python scripts/migrate_sqlite_to_postgres.py
 ```
 
-This creates:
+The editable table is:
 
 ```text
-sqlite_users
-sqlite_interviews
-sqlite_candidate_answers
-sqlite_test_links
-sqlite_interview_questions
+question_bank
 ```
 
-These mirrored collections are for reference only while the app remains on Option A. The live editable question source remains `questions`.
-
-The editable collection is:
-
-```text
-wittmann_interview_ai.questions
-```
-
-Open it in MongoDB Compass to create, edit, disable, or import questions.
+Open it in the HR portal or your PostgreSQL client to create, edit, disable, or import questions.
 
 ### Question format
 
@@ -192,9 +172,9 @@ Open it in MongoDB Compass to create, edit, disable, or import questions.
 
 ### Live exam behavior
 
-- MongoDB is the source of truth for the editable question bank.
+- PostgreSQL `question_bank` is the source of truth for the editable question bank.
 - Each candidate receives a randomized role-based paper when the interview starts.
-- The exact assigned paper is copied into SQLite `interview_questions` so later edits in MongoDB do not change an active or completed interview.
+- The exact assigned paper is copied into PostgreSQL `interview_questions` so later edits in `question_bank` do not change an active or completed interview.
 - Question selection favors the least-used questions first to reduce overlap when many candidates start at the same time.
 - To give 200 candidates completely non-overlapping 18-question papers for one role, the bank would need at least 3,600 active questions for that role. A 500-question bank supports different randomized papers, but not zero reuse across all candidates.
 

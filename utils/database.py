@@ -1,13 +1,33 @@
-import sqlite3
-import json
+import os
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from utils.ai_wrapper import ai_wrapper
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "data" / "interview_system.db"
+DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/wittmann_interview_ai"
+DB_DSN = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+
+
+def _mask_dsn_password(dsn):
+    parsed = urlsplit(dsn)
+    if not parsed.password:
+        return dsn
+    username = parsed.username or ""
+    host = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port else ""
+    netloc = f"{username}:***@{host}{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+DB_LABEL = _mask_dsn_password(DB_DSN)
 
 ROLES = [
     ("manual-testing", "Manual Testing"),
@@ -118,142 +138,164 @@ QUESTION_TOPICS = {
 SECTION_COUNTS = {"Aptitude": 15, "Programming": 3}
 
 
+@contextmanager
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    with psycopg.connect(DB_DSN, row_factory=dict_row, connect_timeout=5) as conn:  # type: ignore[arg-type]
+        yield conn
 
 
 def init_db():
-    DB_PATH.parent.mkdir(exist_ok=True)
     with get_db() as conn:
-        conn.executescript(
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS roles (
-                role_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role_id SERIAL PRIMARY KEY,
                 role_slug TEXT NOT NULL UNIQUE,
                 role_name TEXT NOT NULL
-            );
-
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 email TEXT NOT NULL,
                 phone TEXT NOT NULL,
-                otp_verified INTEGER DEFAULT 0,
+                otp_verified BOOLEAN DEFAULT FALSE,
                 resume_path TEXT,
-                created_at TEXT NOT NULL
-            );
-
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS question_patterns (
-                pattern_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL,
+                pattern_id SERIAL PRIMARY KEY,
+                role_id INTEGER NOT NULL REFERENCES roles(role_id) ON DELETE CASCADE,
                 question_type TEXT NOT NULL,
                 difficulty TEXT NOT NULL,
                 topic TEXT NOT NULL,
                 no_of_questions INTEGER NOT NULL,
                 marks INTEGER NOT NULL,
-                FOREIGN KEY (role_id) REFERENCES roles(role_id)
-            );
-
+                UNIQUE(role_id, question_type)
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS questions (
-                question_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
+                question_id SERIAL PRIMARY KEY,
+                pattern_id INTEGER NOT NULL REFERENCES question_patterns(pattern_id) ON DELETE CASCADE,
+                role_id INTEGER NOT NULL REFERENCES roles(role_id) ON DELETE CASCADE,
                 question_text TEXT NOT NULL,
                 expected_answer TEXT NOT NULL,
                 difficulty TEXT NOT NULL,
-                question_type TEXT NOT NULL,
-                FOREIGN KEY (pattern_id) REFERENCES question_patterns(pattern_id),
-                FOREIGN KEY (role_id) REFERENCES roles(role_id)
-            );
-
+                question_type TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS interviews (
                 interview_id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
-                date TEXT NOT NULL,
+                user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                role_id INTEGER NOT NULL REFERENCES roles(role_id),
+                date TIMESTAMPTZ NOT NULL,
                 total_score REAL DEFAULT 0,
                 status TEXT NOT NULL,
                 shortlist_status TEXT,
                 shortlist_reason TEXT,
-                report_path TEXT,
-                FOREIGN KEY (user_id) REFERENCES users(user_id),
-                FOREIGN KEY (role_id) REFERENCES roles(role_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS candidate_answers (
-                answer_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                interview_id TEXT NOT NULL,
-                question_id INTEGER NOT NULL,
-                answer_text TEXT NOT NULL,
-                ai_score REAL NOT NULL,
-                ai_feedback TEXT NOT NULL,
-                FOREIGN KEY (interview_id) REFERENCES interviews(interview_id),
-                FOREIGN KEY (question_id) REFERENCES questions(question_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS interview_questions (
-                assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                interview_id TEXT NOT NULL,
-                question_key TEXT NOT NULL,
-                display_order INTEGER NOT NULL,
-                question_snapshot_json TEXT NOT NULL,
-                UNIQUE(interview_id, question_key),
-                FOREIGN KEY (interview_id) REFERENCES interviews(interview_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS test_links (
-                token TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                expires_at TEXT NOT NULL,
-                used_at TEXT,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            );
+                report_path TEXT
+            )
             """
         )
-        ensure_column(conn, "users", "otp_verified", "INTEGER DEFAULT 0")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS candidate_answers (
+                answer_id SERIAL PRIMARY KEY,
+                interview_id TEXT NOT NULL REFERENCES interviews(interview_id) ON DELETE CASCADE,
+                question_id TEXT NOT NULL,
+                answer_text TEXT NOT NULL,
+                ai_score REAL NOT NULL,
+                ai_feedback TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS interview_questions (
+                assignment_id SERIAL PRIMARY KEY,
+                interview_id TEXT NOT NULL REFERENCES interviews(interview_id) ON DELETE CASCADE,
+                question_key TEXT NOT NULL,
+                display_order INTEGER NOT NULL,
+                question_snapshot_json JSONB NOT NULL,
+                UNIQUE(interview_id, question_key)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS test_links (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                expires_at TIMESTAMPTZ NOT NULL,
+                used_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        ensure_column(conn, "users", "otp_verified", "BOOLEAN DEFAULT FALSE")
         ensure_column(conn, "users", "resume_path", "TEXT")
         ensure_column(conn, "interviews", "report_path", "TEXT")
         ensure_column(conn, "interviews", "shortlist_status", "TEXT")
         ensure_column(conn, "interviews", "shortlist_reason", "TEXT")
         for slug, name in ROLES:
-            conn.execute("INSERT OR IGNORE INTO roles (role_slug, role_name) VALUES (?, ?)", (slug, name))
+            conn.execute(
+                """
+                INSERT INTO roles (role_slug, role_name)
+                VALUES (%s, %s)
+                ON CONFLICT (role_slug) DO UPDATE SET role_name = EXCLUDED.role_name
+                """,
+                (slug, name),
+            )
         seed_question_patterns(conn)
 
 
 def ensure_column(conn, table_name, column_name, column_definition):
-    columns = [column["name"] for column in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
-    if column_name not in columns:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+        """,
+        (table_name, column_name),
+    ).fetchone()
+    if not row:
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
 
 
 def seed_question_patterns(conn):
-    for role in conn.execute("SELECT role_id, role_slug FROM roles"):
+    roles = conn.execute("SELECT role_id, role_slug FROM roles").fetchall()
+    for role in roles:
         role_topics = QUESTION_TOPICS[role["role_slug"]]
         desired_topics = {section: ", ".join(topics) for section, topics in role_topics.items()}
-        existing_types = {
-            row["question_type"]
-            for row in conn.execute("SELECT DISTINCT question_type FROM question_patterns WHERE role_id = ?", (role["role_id"],))
-        }
-        current_patterns = conn.execute("SELECT question_type, topic FROM question_patterns WHERE role_id = ?", (role["role_id"],)).fetchall()
+        current_patterns = conn.execute(
+            "SELECT question_type, topic FROM question_patterns WHERE role_id = %s",
+            (role["role_id"],),
+        ).fetchall()
+        existing_types = {row["question_type"] for row in current_patterns}
         topics_match = all(row["topic"] == desired_topics.get(row["question_type"]) for row in current_patterns)
         if existing_types and (existing_types != set(SECTION_COUNTS) or not topics_match):
-            conn.execute("DELETE FROM questions WHERE role_id = ?", (role["role_id"],))
-            conn.execute("DELETE FROM question_patterns WHERE role_id = ?", (role["role_id"],))
+            conn.execute("DELETE FROM questions WHERE role_id = %s", (role["role_id"],))
+            conn.execute("DELETE FROM question_patterns WHERE role_id = %s", (role["role_id"],))
         for question_type, count in SECTION_COUNTS.items():
-            exists = conn.execute(
-                "SELECT 1 FROM question_patterns WHERE role_id = ? AND question_type = ?",
-                (role["role_id"], question_type),
-            ).fetchone()
-            if exists:
-                continue
             conn.execute(
                 """
                 INSERT INTO question_patterns
                     (role_id, question_type, difficulty, topic, no_of_questions, marks)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (role_id, question_type) DO NOTHING
                 """,
                 (
                     role["role_id"],
@@ -268,19 +310,22 @@ def seed_question_patterns(conn):
 
 def list_roles():
     with get_db() as conn:
-        return [dict(row) for row in conn.execute("SELECT role_id, role_slug, role_name FROM roles ORDER BY role_id")]
+        return conn.execute("SELECT role_id, role_slug, role_name FROM roles ORDER BY role_id").fetchall()
 
 
 def create_user(name, email, phone, resume_path=""):
     with get_db() as conn:
-        cursor = conn.execute(
+        row = conn.execute(
             """
             INSERT INTO users (name, email, phone, otp_verified, resume_path, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING user_id
             """,
-            (name, email, phone, 1, resume_path, datetime.now().isoformat(timespec="seconds")),
-        )
-        return cursor.lastrowid
+            (name, email, phone, True, resume_path, datetime.now()),
+        ).fetchone()
+        if not row:
+            return None
+        return row["user_id"]
 
 
 def create_test_link(token, user_id, expires_at):
@@ -288,9 +333,9 @@ def create_test_link(token, user_id, expires_at):
         conn.execute(
             """
             INSERT INTO test_links (token, user_id, expires_at, used_at, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (token, user_id, expires_at.isoformat(timespec="seconds"), None, datetime.now().isoformat(timespec="seconds")),
+            (token, user_id, expires_at, None, datetime.now()),
         )
 
 
@@ -302,44 +347,49 @@ def get_test_link(token):
                    u.user_id, u.name, u.email, u.phone, u.resume_path
             FROM test_links tl
             JOIN users u ON u.user_id = tl.user_id
-            WHERE tl.token = ?
+            WHERE tl.token = %s
             """,
             (token,),
         ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    return {**row, "expires_at": row["expires_at"].isoformat(), "used_at": row["used_at"].isoformat() if row["used_at"] else None}
 
 
 def mark_test_link_used(token):
     with get_db() as conn:
-        conn.execute(
-            "UPDATE test_links SET used_at = ? WHERE token = ?",
-            (datetime.now().isoformat(timespec="seconds"), token),
-        )
+        conn.execute("UPDATE test_links SET used_at = %s WHERE token = %s", (datetime.now(), token))
 
 
 def create_interview(interview_id, user_id, role_id):
     with get_db() as conn:
         conn.execute(
             """
-            INSERT OR REPLACE INTO interviews
+            INSERT INTO interviews
                 (interview_id, user_id, role_id, date, total_score, status)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (interview_id) DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                role_id = EXCLUDED.role_id,
+                date = EXCLUDED.date,
+                total_score = EXCLUDED.total_score,
+                status = EXCLUDED.status
             """,
-            (interview_id, user_id, role_id, datetime.now().isoformat(timespec="seconds"), 0, "Started"),
+            (interview_id, user_id, role_id, datetime.now(), 0, "Started"),
         )
 
 
 def save_interview_questions(interview_id, questions):
     with get_db() as conn:
-        conn.execute("DELETE FROM interview_questions WHERE interview_id = ?", (interview_id,))
+        conn.execute("DELETE FROM interview_questions WHERE interview_id = %s", (interview_id,))
         for index, question in enumerate(questions, start=1):
             conn.execute(
                 """
                 INSERT INTO interview_questions
                     (interview_id, question_key, display_order, question_snapshot_json)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
                 """,
-                (interview_id, str(question["id"]), index, json.dumps(question)),
+                (interview_id, str(question["id"]), index, Jsonb(question)),
             )
 
 
@@ -349,12 +399,12 @@ def load_interview_questions(interview_id):
             """
             SELECT question_snapshot_json
             FROM interview_questions
-            WHERE interview_id = ?
+            WHERE interview_id = %s
             ORDER BY display_order
             """,
             (interview_id,),
         ).fetchall()
-    return [json.loads(row["question_snapshot_json"]) for row in rows]
+    return [row["question_snapshot_json"] for row in rows]
 
 
 def complete_interview(interview_id, total_score, report_path, shortlist_status, shortlist_reason):
@@ -362,8 +412,8 @@ def complete_interview(interview_id, total_score, report_path, shortlist_status,
         conn.execute(
             """
             UPDATE interviews
-            SET total_score = ?, status = ?, report_path = ?, shortlist_status = ?, shortlist_reason = ?
-            WHERE interview_id = ?
+            SET total_score = %s, status = %s, report_path = %s, shortlist_status = %s, shortlist_reason = %s
+            WHERE interview_id = %s
             """,
             (total_score, "Completed", report_path, shortlist_status, shortlist_reason, interview_id),
         )
@@ -371,13 +421,13 @@ def complete_interview(interview_id, total_score, report_path, shortlist_status,
 
 def save_candidate_answers(interview_id, results):
     with get_db() as conn:
-        conn.execute("DELETE FROM candidate_answers WHERE interview_id = ?", (interview_id,))
+        conn.execute("DELETE FROM candidate_answers WHERE interview_id = %s", (interview_id,))
         for result in results:
             conn.execute(
                 """
                 INSERT INTO candidate_answers
                     (interview_id, question_id, answer_text, ai_score, ai_feedback)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
                     interview_id,
@@ -391,7 +441,7 @@ def save_candidate_answers(interview_id, results):
 
 def list_reports():
     with get_db() as conn:
-        rows = conn.execute(
+        return conn.execute(
             """
             SELECT i.interview_id, i.date, i.total_score, i.status, i.shortlist_status,
                    i.shortlist_reason, i.report_path,
@@ -403,7 +453,6 @@ def list_reports():
             ORDER BY i.date DESC
             """
         ).fetchall()
-    return [dict(row) for row in rows]
 
 
 def question_keywords(topic, role_name, question_type):
@@ -420,13 +469,13 @@ def parse_question_options(question_text):
 
 def ensure_questions_for_role(role_id):
     with get_db() as conn:
-        role = conn.execute("SELECT role_id, role_slug, role_name FROM roles WHERE role_id = ?", (role_id,)).fetchone()
+        role = conn.execute("SELECT role_id, role_slug, role_name FROM roles WHERE role_id = %s", (role_id,)).fetchone()
         if not role:
             return []
-        patterns = conn.execute("SELECT * FROM question_patterns WHERE role_id = ? ORDER BY pattern_id", (role_id,)).fetchall()
+        patterns = conn.execute("SELECT * FROM question_patterns WHERE role_id = %s ORDER BY pattern_id", (role_id,)).fetchall()
         for pattern in patterns:
             existing_count = conn.execute(
-                "SELECT COUNT(*) AS total FROM questions WHERE pattern_id = ?",
+                "SELECT COUNT(*) AS total FROM questions WHERE pattern_id = %s",
                 (pattern["pattern_id"],),
             ).fetchone()["total"]
             if existing_count >= pattern["no_of_questions"]:
@@ -438,7 +487,7 @@ def ensure_questions_for_role(role_id):
                     """
                     INSERT INTO questions
                         (pattern_id, role_id, question_text, expected_answer, difficulty, question_type)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     """,
                     (
                         pattern["pattern_id"],
@@ -454,7 +503,7 @@ def ensure_questions_for_role(role_id):
             SELECT q.*, r.role_name
             FROM questions q
             JOIN roles r ON r.role_id = q.role_id
-            WHERE q.role_id = ?
+            WHERE q.role_id = %s
             ORDER BY
                 CASE q.question_type WHEN 'Aptitude' THEN 1 WHEN 'Programming' THEN 2 ELSE 3 END,
                 q.question_id
@@ -481,28 +530,39 @@ def ensure_questions_for_role(role_id):
 
 
 def load_database_snapshot():
-    ignored_tables = {"sqlite_sequence"}
+    ignored_tables = {"schema_migrations"}
     snapshot = []
     with get_db() as conn:
         tables = conn.execute(
             """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table'
-            ORDER BY name
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+            ORDER BY table_name
             """
         ).fetchall()
         for table in tables:
-            table_name = table["name"]
+            table_name = table["table_name"]
             if table_name in ignored_tables:
                 continue
-            columns = [column["name"] for column in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
-            rows = conn.execute(f"SELECT * FROM {table_name} LIMIT 50").fetchall()
+            columns = [
+                column["column_name"]
+                for column in conn.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = %s
+                    ORDER BY ordinal_position
+                    """,
+                    (table_name,),
+                ).fetchall()
+            ]
+            rows = conn.execute(f'SELECT * FROM "{table_name}" LIMIT 50').fetchall()
             snapshot.append(
                 {
                     "name": table_name,
                     "columns": columns,
-                    "rows": [dict(row) for row in rows],
+                    "rows": rows,
                 }
             )
     return snapshot

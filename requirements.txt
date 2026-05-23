@@ -8,6 +8,6 @@ pypdf==4.3.1
 python-dotenv==1.0.1
 Pillow==10.4.0
 cryptography==42.0.8
-pymongo==4.10.1
+psycopg[binary]==3.2.13
 # Optional: better semantic scoring. Install only if your laptop supports it.
 # sentence-transformers==3.0.1

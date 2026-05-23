@@ -1,118 +1,160 @@
 import json
-import os
 import random
 from datetime import datetime
 from pathlib import Path
 
-from bson import ObjectId
-from pymongo import ASCENDING, MongoClient
+from psycopg.types.json import Jsonb
+
+from utils.database import get_db
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DB_NAME = "wittmann_interview_ai"
 SECTION_COUNTS = {"Aptitude": 15, "Programming": 3}
 
 
-def get_client():
-    return MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017/"), serverSelectionTimeoutMS=3000)
-
-
-def get_database():
-    return get_client()[os.getenv("MONGODB_DB_NAME", DEFAULT_DB_NAME)]
-
-
 def ensure_question_bank_indexes():
-    db = get_database()
-    db.command("ping")
-    db.questions.create_index(
-        [("role_slug", ASCENDING), ("section", ASCENDING), ("active", ASCENDING)],
-        name="role_section_active_idx",
-    )
-    db.questions.create_index([("role_slug", ASCENDING), ("topic", ASCENDING)], name="role_topic_idx")
-    db.questions.create_index([("question_code", ASCENDING)], unique=True, sparse=True, name="question_code_unique_idx")
+    with get_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS question_bank (
+                question_id SERIAL PRIMARY KEY,
+                question_code TEXT UNIQUE,
+                role_slug TEXT NOT NULL,
+                section TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                difficulty TEXT NOT NULL DEFAULT 'Medium',
+                question_text TEXT NOT NULL,
+                options JSONB NOT NULL DEFAULT '[]'::jsonb,
+                correct_answer TEXT NOT NULL,
+                keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
+                marks INTEGER NOT NULL DEFAULT 5,
+                active BOOLEAN NOT NULL DEFAULT TRUE,
+                assignment_count INTEGER NOT NULL DEFAULT 0,
+                last_assigned_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS question_bank_role_section_active_idx ON question_bank (role_slug, section, active)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS question_bank_role_topic_idx ON question_bank (role_slug, topic)")
 
 
-def normalize_question(document):
-    question_id = str(document["_id"])
-    options = document.get("options") or []
+def normalize_question(row):
     return {
-        "id": question_id,
-        "category": document["section"],
-        "difficulty": document.get("difficulty", "Medium"),
-        "question": document["question_text"],
-        "ideal_answer": document["correct_answer"],
-        "correct_answer": document["correct_answer"],
-        "options": options,
-        "keywords": document.get("keywords") or [],
-        "topic": document.get("topic", ""),
-        "marks": document.get("marks", 5),
+        "id": str(row["question_id"]),
+        "category": row["section"],
+        "difficulty": row.get("difficulty", "Medium"),
+        "question": row["question_text"],
+        "ideal_answer": row["correct_answer"],
+        "correct_answer": row["correct_answer"],
+        "options": row.get("options") or [],
+        "keywords": row.get("keywords") or [],
+        "topic": row.get("topic", ""),
+        "marks": row.get("marks", 5),
     }
 
 
-def select_questions_for_role(role_slug, excluded_ids=None):
-    excluded_ids = excluded_ids or set()
-    db = get_database()
-    selected = []
-    now = datetime.utcnow()
+def assignment_sort_key(item):
+    last_assigned = item.get("last_assigned_at")
+    last_assigned_value = last_assigned.timestamp() if last_assigned else 0
+    return (item.get("assignment_count", 0), last_assigned_value, random.random())
 
-    for section, count in SECTION_COUNTS.items():
-        pool = list(
-            db.questions.find(
-                {
-                    "role_slug": role_slug,
-                    "section": section,
-                    "active": True,
-                    "_id": {"$nin": [ObjectId(value) for value in excluded_ids if ObjectId.is_valid(value)]},
-                }
+
+def select_questions_for_role(role_slug, excluded_ids=None):
+    excluded_ids = {int(value) for value in (excluded_ids or set()) if str(value).isdigit()}
+    selected = []
+    now = datetime.now()
+
+    with get_db() as conn:
+        for section, count in SECTION_COUNTS.items():
+            params = [role_slug, section]
+            excluded_sql = ""
+            if excluded_ids:
+                excluded_sql = "AND question_id <> ALL(%s)"
+                params.append(list(excluded_ids))
+            pool = conn.execute(
+                f"""
+                SELECT *
+                FROM question_bank
+                WHERE role_slug = %s
+                  AND section = %s
+                  AND active = TRUE
+                  {excluded_sql}
+                """,
+                tuple(params),
+            ).fetchall()
+            if len(pool) < count:
+                raise ValueError(
+                    f"PostgreSQL question bank has only {len(pool)} active {section} questions for role '{role_slug}'. "
+                    f"At least {count} are required."
+                )
+            pool.sort(key=assignment_sort_key)
+            chosen = pool[:count]
+            selected.extend(chosen)
+            conn.execute(
+                """
+                UPDATE question_bank
+                SET assignment_count = assignment_count + 1,
+                    last_assigned_at = %s,
+                    updated_at = %s
+                WHERE question_id = ANY(%s)
+                """,
+                (now, now, [item["question_id"] for item in chosen]),
             )
-        )
-        if len(pool) < count:
-            raise ValueError(
-                f"MongoDB question bank has only {len(pool)} active {section} questions for role '{role_slug}'. "
-                f"At least {count} are required."
-            )
-        pool.sort(key=lambda item: (item.get("assignment_count", 0), item.get("last_assigned_at") or datetime.min, random.random()))
-        chosen = pool[:count]
-        selected.extend(chosen)
-        db.questions.update_many(
-            {"_id": {"$in": [item["_id"] for item in chosen]}},
-            {"$inc": {"assignment_count": 1}, "$set": {"last_assigned_at": now}},
-        )
 
     selected.sort(key=lambda item: (0 if item["section"] == "Aptitude" else 1, random.random()))
     return [normalize_question(item) for item in selected]
 
 
 def import_questions_from_json(path):
-    db = get_database()
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, list):
         raise ValueError("Question import file must contain a JSON array.")
 
     operations = 0
-    for item in payload:
-        required = {"question_code", "role_slug", "section", "topic", "question_text", "correct_answer"}
-        missing = required - set(item)
-        if missing:
-            raise ValueError(f"Question is missing required fields: {', '.join(sorted(missing))}")
-        document = {
-            "question_code": item["question_code"],
-            "role_slug": item["role_slug"],
-            "section": item["section"],
-            "topic": item["topic"],
-            "difficulty": item.get("difficulty", "Medium"),
-            "question_text": item["question_text"],
-            "options": item.get("options", []),
-            "correct_answer": item["correct_answer"],
-            "keywords": item.get("keywords", []),
-            "marks": item.get("marks", 5),
-            "active": item.get("active", True),
-            "updated_at": datetime.utcnow(),
-        }
-        db.questions.update_one(
-            {"question_code": document["question_code"]},
-            {"$set": document, "$setOnInsert": {"created_at": datetime.utcnow(), "assignment_count": 0}},
-            upsert=True,
-        )
-        operations += 1
+    now = datetime.now()
+    with get_db() as conn:
+        for item in payload:
+            required = {"question_code", "role_slug", "section", "topic", "question_text", "correct_answer"}
+            missing = required - set(item)
+            if missing:
+                raise ValueError(f"Question is missing required fields: {', '.join(sorted(missing))}")
+            conn.execute(
+                """
+                INSERT INTO question_bank
+                    (question_code, role_slug, section, topic, difficulty, question_text,
+                     options, correct_answer, keywords, marks, active, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (question_code) DO UPDATE SET
+                    role_slug = EXCLUDED.role_slug,
+                    section = EXCLUDED.section,
+                    topic = EXCLUDED.topic,
+                    difficulty = EXCLUDED.difficulty,
+                    question_text = EXCLUDED.question_text,
+                    options = EXCLUDED.options,
+                    correct_answer = EXCLUDED.correct_answer,
+                    keywords = EXCLUDED.keywords,
+                    marks = EXCLUDED.marks,
+                    active = EXCLUDED.active,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (
+                    item["question_code"],
+                    item["role_slug"],
+                    item["section"],
+                    item["topic"],
+                    item.get("difficulty", "Medium"),
+                    item["question_text"],
+                    Jsonb(item.get("options", [])),
+                    item["correct_answer"],
+                    Jsonb(item.get("keywords", [])),
+                    item.get("marks", 5),
+                    item.get("active", True),
+                    now,
+                    now,
+                ),
+            )
+            operations += 1
     return operations

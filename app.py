@@ -18,11 +18,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 from dotenv import load_dotenv
+
+load_dotenv()
+
 from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from utils.ai_wrapper import ai_wrapper
 from utils.database import (
-    DB_PATH,
+    DB_LABEL,
     complete_interview,
     create_test_link,
     create_interview,
@@ -40,8 +43,6 @@ from utils.database import (
 from utils.question_bank import ensure_question_bank_indexes, select_questions_for_role
 from utils.report import generate_pdf_report
 from werkzeug.utils import secure_filename
-
-load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "questions.json"
@@ -371,7 +372,8 @@ def start_test(token):
             message="This interview test link has already been used. Continue from the same browser session if the test is already open.",
             company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
         ), 410
-    if datetime.now() > expires_at:
+    current_time = datetime.now(expires_at.tzinfo) if expires_at.tzinfo else datetime.now()
+    if current_time > expires_at:
         return render_template(
             "test_link.html",
             title="Test Link Expired",
@@ -497,7 +499,7 @@ def admin_database():
     return render_template(
         "database.html",
         tables=load_database_snapshot(),
-        db_path=DB_PATH,
+        db_path=DB_LABEL,
         company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
