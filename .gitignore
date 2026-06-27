@@ -1,14 +1,8 @@
 __pycache__/
 *.pyc
 .env
-.vercel/
-.uv-cache/
-.uv-python/
-.venv/
 .certs/
 data/*.db
 reports/*.pdf
-reports/resumes/
-outputs/
 venv/
 node_modules

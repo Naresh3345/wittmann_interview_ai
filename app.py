@@ -17,7 +17,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import psycopg
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -55,7 +54,6 @@ SHORTLIST_MIN_SCORE = float(os.getenv("SHORTLIST_MIN_SCORE", "70"))
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
-database_initialized = False
 
 cv2_data = getattr(cv2, "data", None)
 haar_folder = getattr(cv2_data, "haarcascades", None) if cv2_data is not None else None
@@ -64,25 +62,6 @@ if not haar_folder:
 
 face_cascade = cv2.CascadeClassifier(os.path.join(haar_folder, "haarcascade_frontalface_default.xml"))
 smile_cascade = cv2.CascadeClassifier(os.path.join(haar_folder, "haarcascade_smile.xml"))
-
-
-def ensure_database_ready():
-    global database_initialized
-    if not database_initialized:
-        init_db()
-        ensure_question_bank_indexes()
-        database_initialized = True
-
-
-@app.errorhandler(psycopg.OperationalError)
-def database_connection_error(error):
-    return render_template(
-        "database.html",
-        tables=[],
-        db_path=DB_LABEL,
-        company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
-        error=str(error),
-    ), 503
 
 
 def load_questions():
@@ -358,7 +337,6 @@ def index():
             if not name or not email or not phone:
                 error = "Could not find name, email, and phone number in the resume. Please enter the missing details and upload again."
             else:
-                ensure_database_ready()
                 user_id = create_user(name, email, phone, str(resume_path))
                 token = secrets.token_urlsafe(32)
                 expires_at = datetime.now() + timedelta(minutes=5)
@@ -392,7 +370,6 @@ def index():
 
 @app.route("/start-test/<token>")
 def start_test(token):
-    ensure_database_ready()
     invite = get_test_link(token)
     if not invite:
         return render_template(
@@ -488,7 +465,6 @@ def verify_otp():
 def select_role():
     if "user_id" not in session:
         return redirect(url_for("index"))
-    ensure_database_ready()
     roles = list_roles()
     error = ""
     if request.method == "POST":
@@ -535,7 +511,6 @@ def interview():
     interview_id = str(uuid.uuid4())
     session["interview_id"] = interview_id
     session["face_stats"] = {"total_frames": 0, "detected_frames": 0, "smile_frames": 0, "stable_frames": 0}
-    ensure_database_ready()
     create_interview(interview_id, session["user_id"], session["role_id"])
     role = get_role_by_id(session["role_id"])
     if not role:
@@ -559,7 +534,6 @@ def interview():
 def admin_database():
     if not admin_key_is_valid():
         return "Admin access required. Add ?key=admin123 to the URL or set ADMIN_REPORT_KEY in .env.", 403
-    ensure_database_ready()
     return render_template(
         "database.html",
         tables=load_database_snapshot(),
@@ -572,7 +546,6 @@ def admin_database():
 def admin_reports():
     if not admin_key_is_valid():
         return "Admin access required. Add ?key=admin123 to the URL or set ADMIN_REPORT_KEY in .env.", 403
-    ensure_database_ready()
     return render_template(
         "admin_reports.html",
         reports=list_reports(),
@@ -584,7 +557,6 @@ def admin_reports():
 @app.route("/api/questions")
 def api_questions():
     if session.get("interview_id"):
-        ensure_database_ready()
         return jsonify(load_interview_questions(session["interview_id"]))
     return jsonify(load_questions())
 
@@ -653,7 +625,6 @@ def analyze_frame():
 @app.route("/api/submit", methods=["POST"])
 def submit_interview():
     payload = request.get_json(force=True)
-    ensure_database_ready()
     candidate = session.get("candidate", {})
     candidate_name = candidate.get("name") or payload.get("candidate_name", "Candidate")
     answers = payload.get("answers", {})
@@ -776,6 +747,10 @@ def resolve_ssl_context():
         app.logger.warning("Configured SSL certificate files were not found. Falling back to Flask adhoc SSL.")
 
     return "adhoc"
+
+
+init_db()
+ensure_question_bank_indexes()
 
 
 if __name__ == "__main__":
