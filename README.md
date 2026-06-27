@@ -124,6 +124,22 @@ ENABLE_HTTPS=0
 
 All application data and the live question bank are stored in PostgreSQL. HR/admin can edit questions directly in the separate HR portal, pgAdmin, DBeaver, or SQL while the Flask app is running.
 
+### Vercel deployment
+
+The app is configured for Vercel with `pyproject.toml` and `vercel.json`.
+
+Add these Environment Variables in the Vercel project settings:
+
+```text
+SECRET_KEY=use-a-long-random-value
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE?sslmode=require
+COMPANY_NAME=WITTMANN BATTENFELD India Pvt. Ltd.
+ADMIN_REPORT_KEY=use-a-private-admin-key
+SHORTLIST_MIN_SCORE=70
+```
+
+Do not use `localhost` in `DATABASE_URL` on Vercel. Use a hosted PostgreSQL database such as Vercel Postgres, Neon, Supabase, or another public PostgreSQL provider.
+
 ### Local setup
 
 Add these values to `.env`:

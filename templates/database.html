@@ -6,6 +6,9 @@
       <p class="eyebrow">Admin Database Viewer</p>
       <h1>PostgreSQL Tables</h1>
       <p class="db-path">{{ db_path }}</p>
+      {% if error %}
+      <p class="empty-table">Database connection failed: {{ error }}</p>
+      {% endif %}
     </div>
     <a class="btn ghost" href="/">Back to Login</a>
   </section>
