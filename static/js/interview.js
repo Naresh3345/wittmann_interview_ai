@@ -11,9 +11,16 @@ const timerSection = document.getElementById('timerSection');
 const timerDisplay = document.getElementById('timerDisplay');
 const warningPopup = document.getElementById('warningPopup');
 const warningPopupMessage = document.getElementById('warningPopupMessage');
+const proctoringNotice = document.getElementById('proctoringNotice');
+const acceptProctoringNotice = document.getElementById('acceptProctoringNotice');
+const cancelProctoringNotice = document.getElementById('cancelProctoringNotice');
 const lanCameraGuide = document.getElementById('lanCameraGuide');
 const lanOriginValue = document.getElementById('lanOriginValue');
 const copyLanOriginButton = document.getElementById('copyLanOriginButton');
+const sectionLauncher = document.getElementById('sectionLauncher');
+const nextSectionButton = document.getElementById('nextSectionButton');
+const submitInterviewButton = document.getElementById('submitInterviewButton');
+const programmingLauncher = document.getElementById('programmingLauncher');
 let activeAnswerId = `answer-${window.QUESTIONS[0]?.id || 1}`;
 let proctoringViolations = [];
 let missingFaceFrames = 0;
@@ -23,6 +30,11 @@ let tabSwitchTotal = 0;
 let submitted = false;
 let timerInterval;
 let activeSection = '';
+let cameraReady = false;
+let proctoringActive = false;
+let frameInterval;
+let proctoringNoticeAccepted = false;
+let aptitudeCompleted = false;
 const SECTION_SECONDS = 20 * 60;
 const sectionRemaining = {
   Aptitude: SECTION_SECONDS,
@@ -57,6 +69,13 @@ document.querySelectorAll('[data-start-section]').forEach((button) => {
   button.addEventListener('click', () => startSection(button.dataset.startSection));
 });
 
+nextSectionButton?.addEventListener('click', () => {
+  aptitudeCompleted = true;
+  startSection('Programming');
+});
+
+submitInterviewButton?.addEventListener('click', () => submitInterview());
+
 document.querySelectorAll('textarea').forEach((textarea) => {
   textarea.addEventListener('focus', () => {
     activeAnswerId = textarea.id;
@@ -77,8 +96,12 @@ async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     video.srcObject = stream;
-    setInterval(sendFrame, 2500);
+    cameraReady = true;
+    faceStatus.innerText = 'Camera enabled';
+    emotionStatus.innerText = 'Ready for interview';
+    alarmMessage.innerText = 'Camera access is enabled. Proctoring starts after you start the test.';
   } catch (e) {
+    cameraReady = false;
     faceStatus.innerText = 'Camera monitoring unavailable.';
     emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Text scoring enabled';
     alarmMessage.innerText = isLanHttp
@@ -86,6 +109,52 @@ async function startCamera() {
       : 'Camera permission was denied or the camera is unavailable.';
     showLanCameraGuide();
   }
+}
+
+function showProctoringNotice() {
+  if (proctoringNoticeAccepted) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    proctoringNotice.hidden = false;
+    acceptProctoringNotice.focus();
+
+    const cleanup = (accepted) => {
+      proctoringNotice.hidden = true;
+      acceptProctoringNotice.removeEventListener('click', acceptHandler);
+      cancelProctoringNotice.removeEventListener('click', cancelHandler);
+      if (accepted) {
+        proctoringNoticeAccepted = true;
+      }
+      resolve(accepted);
+    };
+
+    const acceptHandler = () => cleanup(true);
+    const cancelHandler = () => cleanup(false);
+
+    acceptProctoringNotice.addEventListener('click', acceptHandler);
+    cancelProctoringNotice.addEventListener('click', cancelHandler);
+  });
+}
+
+function armProctoring() {
+  if (proctoringActive) return;
+  proctoringActive = true;
+  alarmMessage.innerText = 'Monitoring camera and tab focus.';
+  emotionStatus.innerText = 'Monitoring active';
+  if (!frameInterval) {
+    frameInterval = setInterval(sendFrame, 2500);
+  }
+}
+
+async function ensureCameraReady() {
+  if (cameraReady) return true;
+  await startCamera();
+  if (cameraReady) return true;
+  const message = isLanHttp
+    ? 'Camera is blocked on this LAN HTTP link. Enable the Chrome secure-origin setting shown in the camera panel, then reload and allow camera access.'
+    : 'Camera access is required before starting the interview. Please allow camera permission and try again.';
+  alarmMessage.innerText = message;
+  showWarningPopup(message);
+  return false;
 }
 
 function playAlarmTone() {
@@ -113,7 +182,7 @@ function showWarningPopup(reason) {
 }
 
 function triggerAlarm(reason, kind = 'warning') {
-  if (submitted) return;
+  if (submitted || !proctoringActive) return;
   const event = {
     reason,
     kind,
@@ -140,6 +209,7 @@ function triggerAlarm(reason, kind = 'warning') {
 }
 
 async function sendFrame() {
+  if (!proctoringActive || submitted) return;
   if (!video.videoWidth) return;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -171,19 +241,29 @@ async function sendFrame() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && activeSection) {
+  if (document.hidden && activeSection && proctoringActive) {
     triggerAlarm('Tab switch detected during interview.', 'tab-switch');
   }
 });
 
-function startSection(sectionName) {
+async function startSection(sectionName) {
   if (submitted) return;
+  if (sectionName === 'Programming' && !aptitudeCompleted) {
+    showWarningPopup('Please complete Aptitude first, then continue to Programming.');
+    return;
+  }
+  if (!(await showProctoringNotice())) return;
+  if (!(await ensureCameraReady())) return;
+  armProctoring();
   requestFullscreenMode();
   activeSection = sectionName;
   document.querySelectorAll('.test-section').forEach((item) => {
     item.hidden = item.dataset.section !== sectionName;
   });
-  document.getElementById('sectionLauncher').hidden = false;
+  sectionLauncher.hidden = true;
+  nextSectionButton.hidden = sectionName !== 'Aptitude';
+  submitInterviewButton.hidden = sectionName !== 'Programming';
+  updateSectionActions();
   timerSection.innerText = `${sectionName} Timer`;
   updateTimerDisplay();
   startSectionTimer();
@@ -191,6 +271,41 @@ function startSection(sectionName) {
   if (firstInput) {
     firstInput.focus();
     activeAnswerId = firstInput.id || activeAnswerId;
+  }
+}
+
+function isQuestionAnswered(question) {
+  const answerBox = document.getElementById(`answer-${question.id}`);
+  const selectedOption = document.querySelector(`input[name="answer-${question.id}"]:checked`);
+  return (answerBox && answerBox.value.trim().length > 0) || Boolean(selectedOption);
+}
+
+function isSectionAnswered(sectionName) {
+  const sectionQuestions = window.QUESTIONS.filter((q) => q.category === sectionName);
+  return sectionQuestions.length > 0 && sectionQuestions.every(isQuestionAnswered);
+}
+
+function updateSectionActions() {
+  if (nextSectionButton) {
+    nextSectionButton.disabled = activeSection !== 'Aptitude' || !isSectionAnswered('Aptitude');
+  }
+  if (submitInterviewButton) {
+    submitInterviewButton.disabled = activeSection !== 'Programming' || !isSectionAnswered('Programming');
+  }
+}
+
+function showSectionLauncher() {
+  document.querySelectorAll('.test-section').forEach((item) => {
+    item.hidden = true;
+  });
+  sectionLauncher.hidden = false;
+  if (programmingLauncher && aptitudeCompleted) {
+    programmingLauncher.classList.remove('locked');
+    const button = programmingLauncher.querySelector('button');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Start Programming';
+    }
   }
 }
 
@@ -202,7 +317,7 @@ function requestFullscreenMode() {
 }
 
 window.addEventListener('blur', () => {
-  if (activeSection) {
+  if (activeSection && proctoringActive) {
     triggerAlarm('Window focus changed during interview.', 'focus-change');
   }
 });
@@ -214,7 +329,18 @@ function startSectionTimer() {
     sectionRemaining[activeSection] -= 1;
     updateTimerDisplay();
     if (sectionRemaining[activeSection] <= 0) {
-      submitInterview(`${activeSection} time limit ended. Test auto submitted.`);
+      if (activeSection === 'Aptitude') {
+        aptitudeCompleted = true;
+        activeSection = '';
+        clearInterval(timerInterval);
+        nextSectionButton.hidden = true;
+        submitInterviewButton.hidden = true;
+        timerSection.innerText = 'Aptitude completed';
+        showSectionLauncher();
+        showWarningPopup('Aptitude time ended. Please start Programming.');
+      } else {
+        submitInterview(`${activeSection} time limit ended. Test auto submitted.`);
+      }
     }
   }, 1000);
 }
@@ -227,12 +353,9 @@ function updateTimerDisplay() {
 }
 
 function updateAnsweredCount() {
-  const count = window.QUESTIONS.filter((q) => {
-    const answerBox = document.getElementById(`answer-${q.id}`);
-    const selectedOption = document.querySelector(`input[name="answer-${q.id}"]:checked`);
-    return (answerBox && answerBox.value.trim().length > 0) || Boolean(selectedOption);
-  }).length;
+  const count = window.QUESTIONS.filter(isQuestionAnswered).length;
   document.getElementById('answeredCount').innerText = count;
+  updateSectionActions();
 }
 
 function startSpeech() {
@@ -262,6 +385,7 @@ async function submitInterview(autoSubmitReason = '') {
   if (submitted) return;
   submitted = true;
   clearInterval(timerInterval);
+  clearInterval(frameInterval);
   document.querySelectorAll('button, input, textarea').forEach((control) => {
     control.disabled = true;
   });

@@ -5,3 +5,4 @@ __pycache__/
 data/*.db
 reports/*.pdf
 venv/
+node_modules

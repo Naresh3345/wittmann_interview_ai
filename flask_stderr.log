@@ -1,47 +1,55 @@
-[2026-05-14 18:59:04,405] WARNING in app: Open the interview app at: http://127.0.0.1:5000, http://192.168.70.102:5000
 WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
  * Running on all addresses (0.0.0.0)
- * Running on http://127.0.0.1:5000
- * Running on http://192.168.70.102:5000
+ * Running on https://127.0.0.1:5000
+ * Running on https://192.168.70.102:5000
 Press CTRL+C to quit
-192.168.70.102 - - [14/May/2026 18:59:16] "HEAD / HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:02:15] "POST / HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:02:15] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:02:21] "GET / HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:02:21] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:02:38] "POST /api/parse-resume HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:02:46] "POST / HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:02:47] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:02:54] "GET /start-test/umzwfRNDnmlhocL3hETk6ywyPlrKDp-s8hzUvbKTV6k HTTP/1.1" 302 -
-192.168.70.117 - - [14/May/2026 19:02:54] "GET /roles HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:02:54] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:02:56] "POST /roles HTTP/1.1" 302 -
-192.168.70.117 - - [14/May/2026 19:02:56] "GET /interview HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:02:56] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:02:56] "GET /static/js/interview.js HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:03:22] "GET /interview HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:03:23] "GET /favicon.ico HTTP/1.1" 404 -
-192.168.70.117 - - [14/May/2026 19:03:23] "GET /favicon.ico HTTP/1.1" 404 -
-192.168.70.117 - - [14/May/2026 19:03:27] "GET /interview HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:03:27] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:03:27] "GET /static/js/interview.js HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:03:49] "GET /start-test/umzwfRNDnmlhocL3hETk6ywyPlrKDp-s8hzUvbKTV6k HTTP/1.1" 410 -
-192.168.70.117 - - [14/May/2026 19:03:49] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:03:51] "GET / HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:03:51] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:03:56] "POST /api/parse-resume HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:04:03] "POST / HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:04:03] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:04:13] "GET /start-test/kxeg3_KqEd_AKLsLBWJ_qExYerFgONt0dH6pnjiYGKs HTTP/1.1" 302 -
-192.168.70.117 - - [14/May/2026 19:04:13] "GET /roles HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:04:13] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:04:15] "POST /roles HTTP/1.1" 302 -
-192.168.70.117 - - [14/May/2026 19:04:15] "GET /interview HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:04:15] "GET /static/css/style.css HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:04:15] "GET /static/js/interview.js HTTP/1.1" 304 -
-192.168.70.117 - - [14/May/2026 19:04:39] "GET /interview HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:04:39] "GET /favicon.ico HTTP/1.1" 404 -
-192.168.70.117 - - [14/May/2026 19:04:39] "GET /favicon.ico HTTP/1.1" 404 -
-192.168.70.117 - - [14/May/2026 19:04:57] "GET /interview HTTP/1.1" 200 -
-192.168.70.117 - - [14/May/2026 19:04:57] "GET /favicon.ico HTTP/1.1" 404 -
-192.168.70.117 - - [14/May/2026 19:04:57] "GET /favicon.ico HTTP/1.1" 404 -
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 293-900-978
+192.168.70.102 - - [13/Jun/2026 13:01:11] "HEAD / HTTP/1.1" 200 -
+127.0.0.1 - - [13/Jun/2026 13:01:11] "HEAD / HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:03:16] "GET / HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:03:16] "GET /static/css/style.css HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:03:16] "GET /static/wittmann-logo-hq.png HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:03:17] "GET /favicon.ico HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:16:56] "GET / HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:16:56] "GET /static/css/style.css HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:16:56] "GET /static/wittmann-logo-hq.png HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:04] "POST /api/parse-resume HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:08] "POST / HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:08] "GET /static/css/style.css HTTP/1.1" 304 -
+192.168.70.102 - - [13/Jun/2026 13:17:08] "GET /static/wittmann-logo-hq.png HTTP/1.1" 304 -
+192.168.70.102 - - [13/Jun/2026 13:17:44] "GET /start-test/Cufyhq4nfedbKrJb2tOeN__0hN2KL5CxOP3X-rocDmc HTTP/1.1" 302 -
+192.168.70.102 - - [13/Jun/2026 13:17:44] "GET /roles HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:44] "GET /static/css/style.css HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:44] "GET /static/wittmann-logo-hq.png HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:48] "POST /roles HTTP/1.1" 302 -
+192.168.70.102 - - [13/Jun/2026 13:17:49] "GET /interview HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:49] "GET /static/css/style.css HTTP/1.1" 304 -
+192.168.70.102 - - [13/Jun/2026 13:17:49] "GET /static/wittmann-logo-hq.png HTTP/1.1" 304 -
+192.168.70.102 - - [13/Jun/2026 13:17:49] "GET /static/js/interview.js HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:53] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:55] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:55] "GET /favicon.ico HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:17:57] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:00] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:02] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:05] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:07] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:10] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:12] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:15] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:17] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:20] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:22] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:25] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:27] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:30] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:32] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:35] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:37] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:40] "POST /api/analyze-frame HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:40] "POST /api/submit HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:40] "GET /interview/result HTTP/1.1" 200 -
+192.168.70.102 - - [13/Jun/2026 13:18:40] "GET /static/css/style.css HTTP/1.1" 304 -
+192.168.70.102 - - [13/Jun/2026 13:18:40] "GET /static/wittmann-logo-hq.png HTTP/1.1" 304 -

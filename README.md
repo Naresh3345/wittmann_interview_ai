@@ -92,7 +92,19 @@ For another system on the same Wi-Fi/LAN, open the host machine address shown in
 https://192.168.70.102:5000
 ```
 
-Chrome may show a certificate warning the first time because the app creates a local development certificate. Click **Advanced**, continue to the site, then allow camera and microphone permission.
+The LAN certificate must be trusted on each Windows computer that opens the interview link. On each computer, open PowerShell as Administrator from the project folder and run:
+
+```powershell
+.\scripts\trust_lan_certificate.ps1
+```
+
+Restart Chrome/Edge after installing the certificate, then open:
+
+```text
+https://192.168.70.102:5000
+```
+
+If the browser still shows "Your connection isn't private", the app is running with a temporary certificate or that computer has not trusted `.certs\lan-server.crt` yet.
 
 To temporarily run without HTTPS, set this in `.env`, but camera and microphone will be blocked on LAN IP addresses:
 

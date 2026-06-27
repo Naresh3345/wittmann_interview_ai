@@ -50,6 +50,7 @@ REPORT_DIR = BASE_DIR / "reports"
 RESUME_DIR = REPORT_DIR / "resumes"
 DEFAULT_COMPANY_NAME = "WITTMANN BATTENFELD India Pvt. Ltd."
 ALLOWED_RESUME_EXTENSIONS = {".pdf", ".docx", ".txt"}
+SHORTLIST_MIN_SCORE = float(os.getenv("SHORTLIST_MIN_SCORE", "70"))
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
@@ -69,7 +70,20 @@ def load_questions():
 
 
 def get_role_by_id(role_id):
-    return next((role for role in list_roles() if role["role_id"] == role_id), None)
+    # list_roles may return dicts or objects; handle both safely
+    for role in list_roles():
+        try:
+            # if role is a dict
+            if isinstance(role, dict):
+                if role.get("role_id") == role_id:
+                    return role
+            else:
+                # if role is an object with attribute
+                if getattr(role, "role_id", None) == role_id:
+                    return role
+        except Exception:
+            continue
+    return None
 
 
 def create_otp():
@@ -126,8 +140,12 @@ def repair_pdf_word_spacing(text):
 
 
 def extract_email(text):
+    direct_match = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.IGNORECASE)
+    if direct_match:
+        return direct_match.group(0).lower()
+
     label_match = re.search(
-        r"(?:e[-\s]*mail|email|mail)\s*[:\-]?\s*([A-Z0-9._%+\-\s]+@\s*[A-Z0-9.\-\s]+\.\s*[A-Z]{2,})",
+        r"(?:e[- \t]*mail|email|mail)[ \t]*[:\-]?[ \t]*([A-Z0-9._%+\- \t]+@[ \t]*[A-Z0-9.\- \t]+\.[ \t]*[A-Z]{2,})",
         text,
         re.IGNORECASE,
     )
@@ -145,9 +163,6 @@ def extract_email(text):
         email_match = re.search(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", candidate)
         return email_match.group(0) if email_match else ""
 
-    direct_match = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.IGNORECASE)
-    if direct_match:
-        return direct_match.group(0).lower()
     return ""
 
 
@@ -293,11 +308,11 @@ def shortlist_candidate(overall_score, proctoring_violations):
     violation_count = len(proctoring_violations)
     if proctoring_rejected(proctoring_violations):
         return "Rejected", "Candidate was rejected because the tab switch or warning limit was reached."
-    if overall_score >= 70 and violation_count <= 2:
-        return "Shortlisted", "Candidate met the score benchmark with acceptable proctoring activity."
+    if overall_score >= SHORTLIST_MIN_SCORE and violation_count <= 2:
+        return "Shortlisted", f"Candidate met the {SHORTLIST_MIN_SCORE:g} marks benchmark with acceptable proctoring activity."
     if violation_count > 2:
         return "Needs Review", "Candidate score requires manual review because proctoring alerts were triggered."
-    return "Not Shortlisted", "Candidate did not meet the minimum shortlist score."
+    return "Not Shortlisted", f"Candidate did not meet the minimum shortlist score of {SHORTLIST_MIN_SCORE:g} marks."
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -451,17 +466,35 @@ def select_role():
     if "user_id" not in session:
         return redirect(url_for("index"))
     roles = list_roles()
+    error = ""
     if request.method == "POST":
         role_id = int(request.form.get("role_id", 0))
-        selected = next((role for role in roles if role["role_id"] == role_id), None)
-        if selected:
+        terms_accepted = request.form.get("terms_accepted") == "yes"
+        selected = next(
+            (
+                role
+                for role in roles
+                if (
+                    (role.get("role_id") if isinstance(role, dict) else getattr(role, "role_id", None))
+                    == role_id
+                )
+            ),
+            None,
+        )
+        if not terms_accepted:
+            error = "Please accept the terms and conditions before starting the interview."
+        elif selected:
             session["role_id"] = role_id
-            session["role_name"] = selected["role_name"]
+            # selected may be a dict or an object; handle both
+            role_name = selected.get("role_name") if isinstance(selected, dict) else getattr(selected, "role_name", None)
+            session["role_name"] = role_name
+            session["terms_accepted"] = True
             return redirect(url_for("interview"))
     return render_template(
         "roles.html",
         roles=roles,
         candidate=session.get("candidate", {}),
+        error=error,
         company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
@@ -472,6 +505,8 @@ def interview():
         return redirect(url_for("index"))
     if "role_id" not in session:
         return redirect(url_for("select_role"))
+    if not session.get("terms_accepted"):
+        return redirect(url_for("select_role"))
 
     interview_id = str(uuid.uuid4())
     session["interview_id"] = interview_id
@@ -480,7 +515,10 @@ def interview():
     role = get_role_by_id(session["role_id"])
     if not role:
         return redirect(url_for("select_role"))
-    questions = select_questions_for_role(role["role_slug"])
+    role_slug = role.get("role_slug") if isinstance(role, dict) else getattr(role, "role_slug", None)
+    if not role_slug:
+        return redirect(url_for("select_role"))
+    questions = select_questions_for_role(role_slug)
     save_interview_questions(interview_id, questions)
 
     return render_template(
@@ -529,9 +567,13 @@ def analyze_frame():
     img_data = payload.get("image", "")
     if "," in img_data:
         img_data = img_data.split(",", 1)[1]
+    if not img_data.strip():
+        return jsonify({"error": "No camera frame image was received."}), 400
 
     try:
         img_bytes = base64.b64decode(img_data)
+        if not img_bytes:
+            raise ValueError("No camera frame image was received.")
         np_arr = np.frombuffer(img_bytes, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         if frame is None:
@@ -682,9 +724,36 @@ def download_resume():
     return send_file(resume_path, as_attachment=True)
 
 
+@app.route("/favicon.ico")
+def favicon():
+    return send_file(BASE_DIR / "static" / "wittmann-logo-hq.png", mimetype="image/png")
+
+
+def resolve_ssl_context():
+    if os.getenv("ENABLE_HTTPS", "1").strip().lower() not in {"1", "true", "yes"}:
+        return None
+
+    cert_file = os.getenv("SSL_CERT_FILE", "").strip()
+    key_file = os.getenv("SSL_KEY_FILE", "").strip()
+    if cert_file and key_file:
+        cert_path = Path(cert_file)
+        key_path = Path(key_file)
+        if not cert_path.is_absolute():
+            cert_path = BASE_DIR / cert_path
+        if not key_path.is_absolute():
+            key_path = BASE_DIR / key_path
+        if cert_path.exists() and key_path.exists():
+            return (str(cert_path), str(key_path))
+        app.logger.warning("Configured SSL certificate files were not found. Falling back to Flask adhoc SSL.")
+
+    return "adhoc"
+
+
 init_db()
 ensure_question_bank_indexes()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.getenv("PORT", "5000"))
+    ssl_context = resolve_ssl_context()
+    app.run(host="0.0.0.0", port=port, debug=True, ssl_context=ssl_context)

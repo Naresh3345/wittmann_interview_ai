@@ -23,7 +23,7 @@
       <span><span id="violationCount">0</span> suspicious activities detected</span>
       <span><span id="tabSwitchCount">0</span>/5 tab switches</span>
       <span><span id="warningCount">0</span>/10 warnings</span>
-      <small id="alarmMessage">Monitoring camera and tab focus.</small>
+      <small id="alarmMessage">Proctoring starts after you start the test.</small>
     </div>
     <div class="timer-box">
       <strong id="timerSection">No section started</strong>
@@ -36,7 +36,6 @@
       <small>{{ role_name }}</small>
     </div>
     <button class="btn ghost full" onclick="startSpeech()">Speak Answer</button>
-    <button class="btn primary full" onclick="submitInterview()">Submit Interview</button>
   </aside>
 
   <section class="question-panel">
@@ -45,7 +44,11 @@
         <p class="eyebrow">{{ company_name }} Focused Assessment</p>
         <h1>{{ role_name }} Interview</h1>
       </div>
-      <div class="progress"><span id="answeredCount">0</span>/{{ questions|length }} answered</div>
+      <div class="interview-actions">
+        <div class="progress"><span id="answeredCount">0</span>/{{ questions|length }} answered</div>
+        <button class="btn ghost" id="nextSectionButton" type="button" hidden>Next: Programming</button>
+        <button class="btn primary" id="submitInterviewButton" type="button" hidden>Submit Test</button>
+      </div>
     </div>
 
     <div id="questions">
@@ -56,11 +59,11 @@
           <p>Logical Reasoning, Verbal Ability, Programming Aptitude, and role-related aptitude.</p>
           <button class="btn primary" type="button" data-start-section="Aptitude">Start Test</button>
         </article>
-        <article class="test-section-card">
+        <article class="test-section-card locked" id="programmingLauncher">
           <p class="eyebrow">Section 2</p>
           <h2>Programming</h2>
-          <p>Java, Python, C, and C++ compiler-style output questions with test cases.</p>
-          <button class="btn primary" type="button" data-start-section="Programming">Start Test</button>
+          <p>Programming questions open after you finish Aptitude.</p>
+          <button class="btn primary" type="button" data-start-section="Programming" disabled>Locked</button>
         </article>
       </section>
 
@@ -102,6 +105,16 @@
     <section id="results" class="results" hidden></section>
   </section>
 </main>
+<div class="notice-modal" id="proctoringNotice" hidden>
+  <div class="notice-dialog" role="dialog" aria-modal="true" aria-labelledby="proctoringNoticeTitle">
+    <strong id="proctoringNoticeTitle">Before You Start</strong>
+    <p>Be aware that suspicious activity such as tab switching, missing face, or multiple faces will be notified during the test. If the warning limit is reached, the test will be automatically submitted.</p>
+    <div class="notice-actions">
+      <button class="btn ghost" id="cancelProctoringNotice" type="button">Cancel</button>
+      <button class="btn primary" id="acceptProctoringNotice" type="button">I Understand, Start Test</button>
+    </div>
+  </div>
+</div>
 <div class="warning-popup" id="warningPopup" hidden>
   <strong>Warning</strong>
   <p id="warningPopupMessage"></p>

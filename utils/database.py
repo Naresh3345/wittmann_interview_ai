@@ -278,6 +278,8 @@ def ensure_column(conn, table_name, column_name, column_definition):
 def seed_question_patterns(conn):
     roles = conn.execute("SELECT role_id, role_slug FROM roles").fetchall()
     for role in roles:
+        if role["role_slug"] not in QUESTION_TOPICS:
+            continue
         role_topics = QUESTION_TOPICS[role["role_slug"]]
         desired_topics = {section: ", ".join(topics) for section, topics in role_topics.items()}
         current_patterns = conn.execute(

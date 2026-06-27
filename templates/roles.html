@@ -15,6 +15,22 @@
       <small>Section 1: Aptitude | Section 2: Programming output tests</small>
     </label>
     {% endfor %}
+    <section class="terms-panel">
+      <strong>Terms and Conditions</strong>
+      <ul>
+        <li>I will attend this interview honestly without outside help.</li>
+        <li>I will keep camera and microphone access enabled during the test.</li>
+        <li>I understand tab switching, missing face, or multiple faces may be treated as suspicious activity.</li>
+        <li>I understand my answers, score, resume details, and proctoring activity may be stored for HR review.</li>
+      </ul>
+      <label class="terms-check">
+        <input type="checkbox" name="terms_accepted" value="yes" id="termsAccepted" required>
+        <span>I accept the terms and conditions and agree to start the interview.</span>
+      </label>
+      {% if error %}
+      <p class="notice error">{{ error }}</p>
+      {% endif %}
+    </section>
     <div class="compatibility-panel" id="compatibilityPanel" hidden>
       <strong>System Compatibility</strong>
       <ul id="compatibilityList"></ul>
@@ -39,6 +55,7 @@
   const list = document.getElementById('compatibilityList');
   const message = document.getElementById('compatibilityMessage');
   const startButton = document.getElementById('startRoleButton');
+  const termsAccepted = document.getElementById('termsAccepted');
   const lanCameraGuide = document.getElementById('lanCameraGuide');
   const lanOriginValue = document.getElementById('lanOriginValue');
   const copyLanOriginButton = document.getElementById('copyLanOriginButton');
@@ -104,27 +121,31 @@
       } catch (error) {
         mediaChecks.push(addCheck('Camera permission granted and working', false));
         mediaChecks.push(addCheck('Microphone permission granted and working', false));
+        if (isLanHttp) {
+          addWarning('Camera and microphone are blocked on LAN HTTP. Open the HTTPS interview link or apply the Chrome secure-origin setting shown below.');
+          lanCameraGuide.hidden = false;
+        }
       } finally {
         if (stream) {
           stream.getTracks().forEach((track) => track.stop());
         }
       }
     } else if (isLanHttp) {
-      addWarning('Camera and microphone are blocked on LAN HTTP. Apply the Chrome secure-origin setting shown below, or continue without camera monitoring.');
+      addWarning('Camera and microphone are blocked on LAN HTTP. Apply the Chrome secure-origin setting shown below before starting.');
       lanCameraGuide.hidden = false;
     }
 
     const requiredPassed = requiredChecks.every(Boolean);
     const mediaPassed = mediaChecks.every(Boolean);
-    const canStart = requiredPassed;
+    const canStart = requiredPassed && mediaPassed;
     if (requiredPassed && !mediaPassed && isLanHttp) {
       lanCameraGuide.hidden = false;
     }
     message.textContent = requiredPassed
-      ? (mediaPassed ? 'All requirements are satisfied. Starting interview...' : 'Camera is blocked by Chrome on LAN HTTP. Starting interview without camera monitoring.')
+      ? (mediaPassed ? 'All requirements are satisfied. Starting interview...' : 'Camera and microphone access are required before starting the interview.')
       : 'Requirements failed. Please use a suitable browser and screen before starting.';
     startButton.disabled = false;
-    startButton.textContent = canStart ? (mediaPassed ? 'Starting Interview...' : 'Starting Without Camera...') : 'Test Camera & Mic Again';
+    startButton.textContent = canStart ? 'Starting Interview...' : 'Test Camera & Mic Again';
     return canStart;
   }
 
@@ -132,6 +153,10 @@
     event.preventDefault();
     const selectedRole = roleForm.querySelector('input[name="role_id"]:checked');
     if (!selectedRole) {
+      roleForm.reportValidity();
+      return;
+    }
+    if (!termsAccepted.checked) {
       roleForm.reportValidity();
       return;
     }
