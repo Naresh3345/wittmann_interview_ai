@@ -9,5 +9,6 @@ python-dotenv==1.0.1
 Pillow==10.4.0
 cryptography==42.0.8
 psycopg[binary]==3.2.13
+gunicorn==23.0.0
 # Optional: better semantic scoring. Install only if your laptop supports it.
 # sentence-transformers==3.0.1

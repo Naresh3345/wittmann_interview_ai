@@ -50,6 +50,11 @@
   </form>
 </main>
 <script>
+  const serverError = {{ (error or "")|tojson }};
+  if (serverError) {
+    alert(serverError);
+  }
+
   const roleForm = document.getElementById('roleForm');
   const panel = document.getElementById('compatibilityPanel');
   const list = document.getElementById('compatibilityList');

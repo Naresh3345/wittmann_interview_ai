@@ -187,6 +187,50 @@ def parse_resume_details(text):
     }
 
 
+ROLE_RESUME_KEYWORDS = {
+    "manual-testing": {
+        "manual testing", "test case", "test cases", "bug", "defect", "jira", "uat",
+        "quality assurance", "qa", "software testing", "functional testing", "regression testing",
+    },
+    "automation-testing": {
+        "automation testing", "selenium", "playwright", "cypress", "testng", "junit",
+        "pytest", "automation framework", "webdriver", "api testing", "postman",
+    },
+    "ai-tech-support": {
+        "technical support", "tech support", "troubleshooting", "ticket", "helpdesk",
+        "customer support", "ai", "machine learning", "chatbot", "llm", "incident",
+    },
+    "software-development": {
+        "software development", "developer", "programming", "python", "java", "javascript",
+        "react", "node", "sql", "database", "api", "full stack", "backend", "frontend",
+    },
+}
+
+
+def normalize_text(value):
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def resume_has_address(text, candidate_location):
+    normalized = normalize_text(text).lower()
+    location = normalize_text(candidate_location).lower()
+    if location and location in normalized:
+        return True
+    address_patterns = [
+        r"\b(address|location|current\s+location|permanent\s+address|residing\s+at|residence)\b\s*[:\-]",
+        r"\b(street|road|nagar|colony|district|city|state|pincode|pin\s*code)\b",
+        r"\b\d{6}\b",
+    ]
+    return any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in address_patterns)
+
+
+def role_matches_resume(role_slug, resume_text):
+    keywords = ROLE_RESUME_KEYWORDS.get(role_slug, set())
+    normalized = normalize_text(resume_text).lower()
+    hits = [keyword for keyword in keywords if keyword in normalized]
+    return len(hits) >= 1
+
+
 def save_uploaded_resume(uploaded_file):
     RESUME_DIR.mkdir(parents=True, exist_ok=True)
     original_name = secure_filename(uploaded_file.filename or "resume")
@@ -319,7 +363,7 @@ def shortlist_candidate(overall_score, proctoring_violations):
 def index():
     error = ""
     invite = None
-    form_values = {"name": "", "email": "", "phone": ""}
+    form_values = {"name": "", "email": "", "phone": "", "candidate_location": "", "candidate_degree": ""}
     if request.method == "POST":
         resume_file = request.files.get("resume")
         if not resume_file or not resume_file.filename:
@@ -331,13 +375,32 @@ def index():
             resume_text = extract_resume_text(resume_path)
             details = parse_resume_details(resume_text)
             name = request.form.get("name", "").strip() or details["name"]
+            candidate_location = request.form.get("candidate_location", "").strip()
+            candidate_degree = request.form.get("candidate_degree", "").strip()
             email = request.form.get("email", "").strip() or details["email"]
             phone = request.form.get("phone", "").strip() or details["phone"]
-            form_values = {"name": name, "email": email, "phone": phone}
-            if not name or not email or not phone:
-                error = "Could not find name, email, and phone number in the resume. Please enter the missing details and upload again."
+            form_values = {
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "candidate_location": candidate_location,
+                "candidate_degree": candidate_degree,
+            }
+            if not name or not candidate_location or not candidate_degree:
+                error = "Please enter candidate name, location, and degree before uploading the resume."
+            elif not email or not phone:
+                error = "Could not find email ID and phone number in the resume. Please enter the missing details and upload again."
+            elif not resume_has_address(resume_text, candidate_location):
+                error = "Resume does not contain an address or matching location. Please upload a resume with address details."
             else:
-                user_id = create_user(name, email, phone, str(resume_path))
+                user_id = create_user(
+                    name,
+                    email,
+                    phone,
+                    str(resume_path),
+                    candidate_location=candidate_location,
+                    candidate_degree=candidate_degree,
+                )
                 token = secrets.token_urlsafe(32)
                 expires_at = datetime.now() + timedelta(minutes=5)
                 create_test_link(token, user_id, expires_at)
@@ -352,6 +415,8 @@ def index():
                     "name": name,
                     "email": email,
                     "phone": phone,
+                    "candidate_location": candidate_location,
+                    "candidate_degree": candidate_degree,
                     "resume_path": resume_path,
                     "sent": mail_result["sent"],
                     "mail_status": mail_result["status"],
@@ -403,6 +468,8 @@ def start_test(token):
         "name": invite["name"],
         "email": invite["email"],
         "phone": invite["phone"],
+        "candidate_location": invite.get("candidate_location", ""),
+        "candidate_degree": invite.get("candidate_degree", ""),
         "resume_path": invite.get("resume_path", ""),
     }
     return redirect(url_for("select_role"))
@@ -422,7 +489,9 @@ def api_parse_resume():
         with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as temp_file:
             resume_file.save(temp_file)
             temp_path = Path(temp_file.name)
-        details = parse_resume_details(extract_resume_text(temp_path))
+        resume_text = extract_resume_text(temp_path)
+        details = parse_resume_details(resume_text)
+        details["has_address"] = resume_has_address(resume_text, "")
         return jsonify(details)
     finally:
         if temp_path and temp_path.exists():
@@ -466,7 +535,7 @@ def select_role():
     if "user_id" not in session:
         return redirect(url_for("index"))
     roles = list_roles()
-    error = ""
+    error = "You cannot attend this interview. Your resume is not matching with the selected role." if request.args.get("role_error") == "mismatch" else ""
     if request.method == "POST":
         role_id = int(request.form.get("role_id", 0))
         terms_accepted = request.form.get("terms_accepted") == "yes"
@@ -484,12 +553,18 @@ def select_role():
         if not terms_accepted:
             error = "Please accept the terms and conditions before starting the interview."
         elif selected:
-            session["role_id"] = role_id
-            # selected may be a dict or an object; handle both
-            role_name = selected.get("role_name") if isinstance(selected, dict) else getattr(selected, "role_name", None)
-            session["role_name"] = role_name
-            session["terms_accepted"] = True
-            return redirect(url_for("interview"))
+            role_slug = selected.get("role_slug") if isinstance(selected, dict) else getattr(selected, "role_slug", None)
+            resume_path = session.get("candidate", {}).get("resume_path", "")
+            resume_text = extract_resume_text(resume_path) if resume_path else ""
+            if not role_matches_resume(role_slug, resume_text):
+                error = "You cannot attend this interview. Your resume is not matching with the selected role."
+            else:
+                session["role_id"] = role_id
+                # selected may be a dict or an object; handle both
+                role_name = selected.get("role_name") if isinstance(selected, dict) else getattr(selected, "role_name", None)
+                session["role_name"] = role_name
+                session["terms_accepted"] = True
+                return redirect(url_for("interview"))
     return render_template(
         "roles.html",
         roles=roles,
@@ -518,6 +593,14 @@ def interview():
     role_slug = role.get("role_slug") if isinstance(role, dict) else getattr(role, "role_slug", None)
     if not role_slug:
         return redirect(url_for("select_role"))
+    resume_path = session.get("candidate", {}).get("resume_path", "")
+    resume_text = extract_resume_text(resume_path) if resume_path else ""
+    if not role_matches_resume(role_slug, resume_text):
+        session.pop("role_id", None)
+        session.pop("role_name", None)
+        session.pop("terms_accepted", None)
+        return redirect(url_for("select_role", role_error="mismatch"))
+
     questions = select_questions_for_role(role_slug)
     save_interview_questions(interview_id, questions)
 

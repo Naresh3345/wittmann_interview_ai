@@ -162,6 +162,8 @@ def init_db():
                 name TEXT NOT NULL,
                 email TEXT NOT NULL,
                 phone TEXT NOT NULL,
+                candidate_location TEXT,
+                candidate_degree TEXT,
                 otp_verified BOOLEAN DEFAULT FALSE,
                 resume_path TEXT,
                 created_at TIMESTAMPTZ NOT NULL
@@ -206,6 +208,7 @@ def init_db():
                 status TEXT NOT NULL,
                 shortlist_status TEXT,
                 shortlist_reason TEXT,
+                reviewer_note TEXT,
                 report_path TEXT
             )
             """
@@ -247,9 +250,12 @@ def init_db():
         )
         ensure_column(conn, "users", "otp_verified", "BOOLEAN DEFAULT FALSE")
         ensure_column(conn, "users", "resume_path", "TEXT")
+        ensure_column(conn, "users", "candidate_location", "TEXT")
+        ensure_column(conn, "users", "candidate_degree", "TEXT")
         ensure_column(conn, "interviews", "report_path", "TEXT")
         ensure_column(conn, "interviews", "shortlist_status", "TEXT")
         ensure_column(conn, "interviews", "shortlist_reason", "TEXT")
+        ensure_column(conn, "interviews", "reviewer_note", "TEXT")
         for slug, name in ROLES:
             conn.execute(
                 """
@@ -315,15 +321,16 @@ def list_roles():
         return conn.execute("SELECT role_id, role_slug, role_name FROM roles ORDER BY role_id").fetchall()
 
 
-def create_user(name, email, phone, resume_path=""):
+def create_user(name, email, phone, resume_path="", candidate_location="", candidate_degree=""):
     with get_db() as conn:
         row = conn.execute(
             """
-            INSERT INTO users (name, email, phone, otp_verified, resume_path, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO users
+                (name, email, phone, candidate_location, candidate_degree, otp_verified, resume_path, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING user_id
             """,
-            (name, email, phone, True, resume_path, datetime.now()),
+            (name, email, phone, candidate_location, candidate_degree, True, resume_path, datetime.now()),
         ).fetchone()
         if not row:
             return None
@@ -346,7 +353,7 @@ def get_test_link(token):
         row = conn.execute(
             """
             SELECT tl.token, tl.expires_at, tl.used_at,
-                   u.user_id, u.name, u.email, u.phone, u.resume_path
+                   u.user_id, u.name, u.email, u.phone, u.candidate_location, u.candidate_degree, u.resume_path
             FROM test_links tl
             JOIN users u ON u.user_id = tl.user_id
             WHERE tl.token = %s
@@ -446,8 +453,8 @@ def list_reports():
         return conn.execute(
             """
             SELECT i.interview_id, i.date, i.total_score, i.status, i.shortlist_status,
-                   i.shortlist_reason, i.report_path,
-                   u.name, u.email, u.phone, u.resume_path, r.role_name
+                   i.shortlist_reason, i.report_path, i.reviewer_note,
+                   u.name, u.email, u.phone, u.candidate_location, u.candidate_degree, u.resume_path, r.role_name
             FROM interviews i
             JOIN users u ON u.user_id = i.user_id
             JOIN roles r ON r.role_id = i.role_id

@@ -4,7 +4,7 @@
   <section class="login-copy">
     <p class="eyebrow">Step 1</p>
     <h1>Upload Resume</h1>
-    <p class="subtitle">Upload the candidate resume. The system extracts name, email ID, and phone number, then sends a 5-minute interview test link to the extracted email address.</p>
+    <p class="subtitle">Enter candidate name, location, and degree before uploading the resume. The system verifies address details, extracts email ID and phone number, then sends a 5-minute interview test link.</p>
   </section>
 
   <section class="form-panel">
@@ -17,6 +17,8 @@
       <strong>{{ invite.name }}</strong>
       <span>{{ invite.email }}</span>
       <span>{{ invite.phone }}</span>
+      <span>{{ invite.candidate_location }}</span>
+      <span>{{ invite.candidate_degree }}</span>
       <small>Resume saved to reports. Link expires at {{ invite.expires_at }}.</small>
     </div>
     {% if invite.sent %}
@@ -34,14 +36,20 @@
     {% endif %}
 
     <form method="post" enctype="multipart/form-data" class="candidate-form" id="candidateForm">
+      <label for="name">Name</label>
+      <input id="name" name="name" value="{{ form_values.name }}" placeholder="Candidate full name" required>
+
+      <label for="candidate_location">Location</label>
+      <input id="candidate_location" name="candidate_location" value="{{ form_values.candidate_location }}" placeholder="Example: Chennai Porur" required>
+
+      <label for="candidate_degree">Degree</label>
+      <input id="candidate_degree" name="candidate_degree" value="{{ form_values.candidate_degree }}" placeholder="Example: B.Tech CSE" required>
+
       <label for="resume">Resume</label>
       <input id="resume" name="resume" type="file" accept=".pdf,.docx,.txt" required>
-      <p class="form-hint" id="resumeParseStatus">Choose a resume to auto-fill candidate details.</p>
+      <p class="form-hint" id="resumeParseStatus">Choose a resume after entering name, location, and degree.</p>
 
-      <p class="form-hint">Optional fallback fields are used only if the resume parser cannot read a value.</p>
-
-      <label for="name">Name</label>
-      <input id="name" name="name" value="{{ form_values.name }}" placeholder="Auto-filled from resume when possible">
+      <p class="form-hint">Email ID and phone number are auto-filled from the resume when possible.</p>
 
       <label for="email">Email ID</label>
       <input id="email" name="email" type="email" value="{{ form_values.email }}" placeholder="candidate@example.com">
@@ -65,8 +73,11 @@
   const nameInput = document.getElementById('name');
   const emailInput = document.getElementById('email');
   const phoneInput = document.getElementById('phone');
+  const locationInput = document.getElementById('candidate_location');
+  const degreeInput = document.getElementById('candidate_degree');
   const parseStatus = document.getElementById('resumeParseStatus');
   let parsedCurrentFile = false;
+  let resumeHasAddress = false;
 
   async function parseSelectedResume() {
     const file = resumeInput.files?.[0];
@@ -89,6 +100,10 @@
       if (details.name) nameInput.value = details.name;
       if (details.email) emailInput.value = details.email;
       if (details.phone) phoneInput.value = details.phone;
+      resumeHasAddress = Boolean(details.has_address);
+      if (!details.has_address) {
+        alert('Resume does not contain address or location details. Please upload a resume with address details.');
+      }
 
       const missing = ['name', 'email', 'phone'].filter((field) => !details[field]);
       parseStatus.textContent = missing.length
@@ -104,11 +119,23 @@
 
   resumeInput?.addEventListener('change', async () => {
     parsedCurrentFile = false;
+    resumeHasAddress = false;
     await parseSelectedResume();
   });
 
   candidateForm?.addEventListener('submit', async (event) => {
-    const needsDetails = !nameInput.value.trim() || !emailInput.value.trim() || !phoneInput.value.trim();
+    if (!nameInput.value.trim() || !locationInput.value.trim() || !degreeInput.value.trim()) {
+      event.preventDefault();
+      alert('Please enter candidate name, location, and degree before uploading the resume.');
+      return;
+    }
+    if (!resumeHasAddress && parsedCurrentFile) {
+      event.preventDefault();
+      alert('Resume does not contain address or location details. Please upload a resume with address details.');
+      return;
+    }
+
+    const needsDetails = !emailInput.value.trim() || !phoneInput.value.trim();
     if (needsDetails && !parsedCurrentFile) {
       event.preventDefault();
       const parsed = await parseSelectedResume();
