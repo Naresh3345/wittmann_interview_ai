@@ -49,6 +49,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "questions.json"
 REPORT_DIR = Path(os.getenv("REPORT_DIR", str(BASE_DIR / "reports"))).resolve()
 RESUME_DIR = REPORT_DIR / "resumes"
+PROFILE_PHOTO_DIR = REPORT_DIR / "profile_photos"
 DEFAULT_COMPANY_NAME = "WITTMANN BATTENFELD India Pvt. Ltd."
 ALLOWED_RESUME_EXTENSIONS = {".pdf", ".docx", ".txt"}
 SHORTLIST_MIN_SCORE = float(os.getenv("SHORTLIST_MIN_SCORE", "70"))
@@ -104,6 +105,49 @@ def create_otp():
 
 def resume_file_allowed(filename):
     return Path(filename).suffix.lower() in ALLOWED_RESUME_EXTENSIONS
+
+
+def save_profile_photo_from_data_url(data_url, candidate_name):
+    if not data_url or "," not in data_url:
+        return ""
+    header, img_data = data_url.split(",", 1)
+    if "image/" not in header:
+        return ""
+    try:
+        img_bytes = base64.b64decode(img_data)
+        if not img_bytes:
+            return ""
+        np_arr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return ""
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, 1.1, 4, minSize=(45, 45))
+        if len(faces) > 0:
+            x, y, w, h = max(faces, key=lambda r: r[2] * r[3])
+            pad_x = int(w * 0.65)
+            pad_top = int(h * 0.75)
+            pad_bottom = int(h * 1.05)
+            x1 = max(x - pad_x, 0)
+            y1 = max(y - pad_top, 0)
+            x2 = min(x + w + pad_x, rgb.shape[1])
+            y2 = min(y + h + pad_bottom, rgb.shape[0])
+            rgb = rgb[y1:y2, x1:x2]
+        from PIL import Image
+        image = Image.fromarray(rgb)
+        image.thumbnail((420, 560))
+        canvas = Image.new("RGB", (420, 560), "white")
+        offset = ((420 - image.width) // 2, (560 - image.height) // 2)
+        canvas.paste(image, offset)
+        PROFILE_PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", candidate_name or "candidate").strip("_") or "candidate"
+        photo_path = PROFILE_PHOTO_DIR / f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+        canvas.save(photo_path, "JPEG", quality=88)
+        return str(photo_path)
+    except Exception as exc:
+        app.logger.warning("Profile photo save failed: %s", exc)
+        return ""
 
 
 def extract_text_from_docx(path):
@@ -705,6 +749,13 @@ def camera_check():
     if not session.get("terms_accepted"):
         return redirect(url_for("select_role"))
     if request.method == "POST":
+        candidate = session.get("candidate", {})
+        photo_path = save_profile_photo_from_data_url(
+            request.form.get("profile_photo", ""),
+            candidate.get("name", "candidate"),
+        )
+        if photo_path:
+            session["candidate_profile_photo"] = photo_path
         session["camera_check_passed"] = True
         return redirect(url_for("interview"))
     return render_template(
@@ -918,6 +969,7 @@ def submit_interview():
         "candidate_email": candidate.get("email", ""),
         "candidate_phone": candidate.get("phone", ""),
         "resume_path": candidate.get("resume_path", ""),
+        "profile_photo_path": session.get("candidate_profile_photo", ""),
         "confidence_index": round(((stats.get("detected_frames", 0) / total) * 55) + ((stats.get("stable_frames", 0) / total) * 30) + ((stats.get("smile_frames", 0) / total) * 15), 2),
         "proctoring_violations": proctoring_violations,
         "auto_submit_reason": auto_submit_reason,

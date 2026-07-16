@@ -16,6 +16,7 @@
     <div class="face-preview-wrap camera-check-preview">
       <video id="cameraCheckVideo" autoplay muted playsinline></video>
       <div class="face-center-guide not-centered" id="faceCenterGuide" aria-hidden="true"></div>
+      <div class="privacy-shield" id="privacyShield" hidden>Camera hidden while this page is not active.</div>
     </div>
     <canvas id="cameraCheckSnapshot" width="360" height="270" hidden></canvas>
 
@@ -39,9 +40,11 @@
     </div>
 
     <form method="post" id="cameraCheckForm">
+      <input type="hidden" name="profile_photo" id="profilePhotoInput">
       <button class="btn primary full" id="startAptitudeButton" type="submit" disabled>Start Aptitude Test</button>
     </form>
     <button class="btn ghost full" id="retryCameraCheckButton" type="button">Test Camera Again</button>
+    <p class="form-hint warning-text">Screenshots and screen recording are not permitted during camera verification.</p>
   </section>
 </main>
 
@@ -58,8 +61,10 @@
   const statusText = document.getElementById('faceCenterStatus');
   const checkList = document.getElementById('cameraCheckList');
   const startButton = document.getElementById('startAptitudeButton');
+  const profilePhotoInput = document.getElementById('profilePhotoInput');
   const retryButton = document.getElementById('retryCameraCheckButton');
   const successPopup = document.getElementById('cameraSuccessPopup');
+  const privacyShield = document.getElementById('privacyShield');
   const browserCameraGuide = document.getElementById('browserCameraGuide');
   const copyBrowserLinkButton = document.getElementById('copyBrowserLinkButton');
   const lanCameraGuide = document.getElementById('lanCameraGuide');
@@ -111,6 +116,12 @@
     return passed;
   }
 
+  function captureFrameDataUrl() {
+    const ctx = snapshot.getContext('2d');
+    ctx.drawImage(video, 0, 0, snapshot.width, snapshot.height);
+    return snapshot.toDataURL('image/jpeg', 0.82);
+  }
+
   function setCentered(centered, text) {
     guide.classList.toggle('centered', centered);
     guide.classList.toggle('not-centered', !centered);
@@ -134,9 +145,7 @@
   }
 
   async function analyzeFrame() {
-    const ctx = snapshot.getContext('2d');
-    ctx.drawImage(video, 0, 0, snapshot.width, snapshot.height);
-    const image = snapshot.toDataURL('image/jpeg', 0.7);
+    const image = captureFrameDataUrl();
     const response = await fetch('/api/analyze-frame', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -217,6 +226,7 @@
 
       if (centeredFrames >= 3) {
         addCheck('Face is centered in camera frame', true);
+        profilePhotoInput.value = captureFrameDataUrl();
         setCentered(true, 'Face centered. You can start the aptitude test.');
         successPopup.hidden = false;
         startButton.disabled = false;
@@ -233,6 +243,20 @@
   }
 
   retryButton.addEventListener('click', runCameraCheck);
+  document.addEventListener('copy', (event) => event.preventDefault());
+  document.addEventListener('cut', (event) => event.preventDefault());
+  document.addEventListener('paste', (event) => event.preventDefault());
+  document.addEventListener('contextmenu', (event) => event.preventDefault());
+  document.addEventListener('selectstart', (event) => event.preventDefault());
+  document.addEventListener('visibilitychange', () => {
+    privacyShield.hidden = !document.hidden;
+  });
+  window.addEventListener('blur', () => {
+    privacyShield.hidden = false;
+  });
+  window.addEventListener('focus', () => {
+    privacyShield.hidden = true;
+  });
   document.getElementById('cameraCheckForm').addEventListener('submit', () => {
     stopStream();
   });

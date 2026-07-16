@@ -5,7 +5,7 @@ from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import LongTable, Paragraph, Spacer, TableStyle
+from reportlab.platypus import Image, LongTable, Paragraph, Spacer, Table, TableStyle
 from xml.sax.saxutils import escape
 
 
@@ -100,14 +100,34 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
 
     story.append(Paragraph("WITTMANN BATTENFELD India Pvt. Ltd. AI Interview System", title_style))
     story.append(Paragraph("Candidate Interview Assessment Report", heading_style))
-    story.append(Paragraph(f"Candidate: {escape(candidate_name)}", normal_style))
+    candidate_details = [[Paragraph(f"Candidate: {escape(candidate_name)}", normal_style)]]
     if face_summary.get("candidate_email"):
-        story.append(Paragraph(f"Email: {escape(face_summary.get('candidate_email'))}", normal_style))
+        candidate_details.append([Paragraph(f"Email: {escape(face_summary.get('candidate_email'))}", normal_style)])
     if face_summary.get("candidate_phone"):
-        story.append(Paragraph(f"Phone: {escape(face_summary.get('candidate_phone'))}", normal_style))
+        candidate_details.append([Paragraph(f"Phone: {escape(face_summary.get('candidate_phone'))}", normal_style)])
     if face_summary.get("resume_path"):
-        story.append(Paragraph(f"Resume Saved: {escape(face_summary.get('resume_path'))}", normal_style))
-    story.append(Paragraph(f"Generated: {datetime.now().strftime('%d-%m-%Y %I:%M %p')}", normal_style))
+        candidate_details.append([Paragraph(f"Resume Saved: {escape(face_summary.get('resume_path'))}", normal_style)])
+    candidate_details.append([Paragraph(f"Generated: {datetime.now().strftime('%d-%m-%Y %I:%M %p')}", normal_style)])
+    profile_photo_value = face_summary.get("profile_photo_path") or ""
+    profile_photo_path = Path(profile_photo_value) if profile_photo_value else None
+    if profile_photo_path and profile_photo_path.exists():
+        photo = Image(str(profile_photo_path), width=82, height=110)
+        photo_table = Table(
+            [[Table(candidate_details, colWidths=[doc.width - 112]), photo]],
+            colWidths=[doc.width - 104, 90],
+        )
+        photo_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("BOX", (1, 0), (1, 0), 0.75, colors.HexColor("#111827")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(photo_table)
+    else:
+        for row in candidate_details:
+            story.append(row[0])
     story.append(Spacer(1, 14))
 
     avg = sum(r["score"]["total_score"] for r in results) / max(len(results), 1)
