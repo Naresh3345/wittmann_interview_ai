@@ -118,28 +118,39 @@ def select_questions_for_role(role_slug, excluded_ids=None, allowed_question_set
 
     with get_db() as conn:
         question_sets = parse_question_sets(allowed_question_sets)
-        if question_sets:
-            params = [role_slug, question_sets]
+        for section, count in SECTION_COUNTS.items():
+            params = [role_slug, section]
             excluded_sql = ""
+            set_sql = ""
+            if question_sets:
+                set_sql = "AND question_set = ANY(%s)"
+                params.append(question_sets)
             if excluded_ids:
                 excluded_sql = "AND question_id <> ALL(%s)"
                 params.append(list(excluded_ids))
-            selected = conn.execute(
+            pool = conn.execute(
                 f"""
                 SELECT *
                 FROM question_bank
                 WHERE role_slug = %s
-                  AND question_set = ANY(%s)
+                  AND section = %s
+                  {set_sql}
                   AND active = TRUE
                   AND deleted_at IS NULL
                   {excluded_sql}
                 """,
                 tuple(params),
             ).fetchall()
-            if not selected:
+            if len(pool) < count:
+                source_label = f" in selected sets: {', '.join(question_sets)}" if question_sets else ""
                 raise ValueError(
-                    f"No active questions are available for role '{role_slug}' in selected sets: {', '.join(question_sets)}."
+                    f"PostgreSQL question bank has only {len(pool)} active {section} questions for role '{role_slug}'{source_label}. "
+                    f"At least {count} are required."
                 )
+            pool.sort(key=assignment_sort_key)
+            chosen = pool[:count]
+            random.shuffle(chosen)
+            selected.extend(chosen)
             conn.execute(
                 """
                 UPDATE question_bank
@@ -148,47 +159,9 @@ def select_questions_for_role(role_slug, excluded_ids=None, allowed_question_set
                     updated_at = %s
                 WHERE question_id = ANY(%s)
                 """,
-                (now, now, [item["question_id"] for item in selected]),
+                (now, now, [item["question_id"] for item in chosen]),
             )
-        else:
-            for section, count in SECTION_COUNTS.items():
-                params = [role_slug, section]
-                excluded_sql = ""
-                if excluded_ids:
-                    excluded_sql = "AND question_id <> ALL(%s)"
-                    params.append(list(excluded_ids))
-                pool = conn.execute(
-                    f"""
-                    SELECT *
-                    FROM question_bank
-                    WHERE role_slug = %s
-                      AND section = %s
-                      AND active = TRUE
-                      AND deleted_at IS NULL
-                      {excluded_sql}
-                    """,
-                    tuple(params),
-                ).fetchall()
-                if len(pool) < count:
-                    raise ValueError(
-                        f"PostgreSQL question bank has only {len(pool)} active {section} questions for role '{role_slug}'. "
-                        f"At least {count} are required."
-                    )
-                pool.sort(key=assignment_sort_key)
-                chosen = pool[:count]
-                selected.extend(chosen)
-                conn.execute(
-                    """
-                    UPDATE question_bank
-                    SET assignment_count = assignment_count + 1,
-                        last_assigned_at = %s,
-                        updated_at = %s
-                    WHERE question_id = ANY(%s)
-                    """,
-                    (now, now, [item["question_id"] for item in chosen]),
-                )
 
-    random.shuffle(selected)
     return [normalize_question(item) for item in selected]
 
 

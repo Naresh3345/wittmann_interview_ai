@@ -138,6 +138,7 @@
 </script>
 <script>
   window.QUESTIONS = JSON.parse(document.getElementById('questions-data').textContent);
+  window.SECTION_DURATIONS = {{ section_durations | tojson | safe }};
 </script>
 <script src="{{ url_for('static', filename='js/interview.js') }}"></script>
 {% endblock %}

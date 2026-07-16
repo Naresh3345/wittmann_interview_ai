@@ -731,6 +731,8 @@ def interview():
     allowed_degrees = allowed_degrees or ""
     allowed_question_sets = role.get("allowed_question_sets") if isinstance(role, dict) else getattr(role, "allowed_question_sets", "")
     allowed_question_sets = allowed_question_sets or ""
+    aptitude_minutes = role.get("aptitude_minutes") if isinstance(role, dict) else getattr(role, "aptitude_minutes", 20)
+    programming_minutes = role.get("programming_minutes") if isinstance(role, dict) else getattr(role, "programming_minutes", 20)
     resume_path = session.get("candidate", {}).get("resume_path", "")
     resume_text = extract_resume_text(resume_path) if resume_path else ""
     candidate_degree = session.get("candidate", {}).get("candidate_degree", "")
@@ -747,6 +749,10 @@ def interview():
         questions=questions,
         candidate=session.get("candidate", {}),
         role_name=session.get("role_name", ""),
+        section_durations={
+            "Aptitude": max(int(aptitude_minutes or 20), 1) * 60,
+            "Programming": max(int(programming_minutes or 20), 1) * 60,
+        },
         company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
@@ -820,13 +826,18 @@ def analyze_frame():
             frame_area = gray.shape[0] * gray.shape[1]
             face_ratio = (w * h) / frame_area
             frame_h, frame_w = gray.shape[:2]
+            significant_faces = [
+                face for face in faces
+                if (face[2] * face[3]) / frame_area >= 0.035
+            ]
+            has_multiple_people = len(significant_faces) > 1
             face_center_x = (x + (w / 2)) / frame_w
             face_center_y = (y + (h / 2)) / frame_h
             face_centered = (
                 abs(face_center_x - 0.5) <= 0.18
                 and abs(face_center_y - 0.46) <= 0.22
                 and 0.06 <= face_ratio <= 0.55
-                and len(faces) == 1
+                and not has_multiple_people
             )
             if 0.08 <= face_ratio <= 0.45:
                 stats["stable_frames"] += 1
@@ -841,7 +852,7 @@ def analyze_frame():
                 hint = "Good focus detected. Add a natural smile when appropriate."
             result = {
                 "face_detected": True,
-                "multiple_faces": len(faces) > 1,
+                "multiple_faces": has_multiple_people,
                 "face_centered": face_centered,
                 "face_box": {
                     "x": x / frame_w,
@@ -852,9 +863,9 @@ def analyze_frame():
                     "cy": face_center_y,
                 },
                 "emotion": emotion,
-                "confidence_hint": "Face is centered. You can start the test." if face_centered else "Move your face inside the center mark.",
-                "alert_level": "danger" if len(faces) > 1 else "ok",
-                "alert_reason": "Multiple faces detected in camera frame." if len(faces) > 1 else "",
+                "confidence_hint": "Face is centered. Keep looking at the camera." if face_centered else "Keep your face visible and near the center.",
+                "alert_level": "danger" if has_multiple_people else "ok",
+                "alert_reason": "Multiple people detected in camera frame." if has_multiple_people else "",
             }
 
         session["face_stats"] = stats

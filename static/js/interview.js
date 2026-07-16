@@ -43,11 +43,12 @@ let proctoringActive = false;
 let frameInterval;
 let proctoringNoticeAccepted = false;
 let aptitudeCompleted = false;
-const SECTION_SECONDS = 20 * 60;
+const sectionDurations = window.SECTION_DURATIONS || {};
+const DEFAULT_SECTION_SECONDS = 20 * 60;
 const MIN_APTITUDE_ANSWERS = 5;
 const sectionRemaining = {
-  Aptitude: SECTION_SECONDS,
-  Programming: SECTION_SECONDS,
+  Aptitude: Number(sectionDurations.Aptitude) || DEFAULT_SECTION_SECONDS,
+  Programming: Number(sectionDurations.Programming) || DEFAULT_SECTION_SECONDS,
 };
 const secureOrigin = `https://${location.host}`;
 const secureCurrentUrl = `${secureOrigin}${location.pathname}${location.search}${location.hash}`;
@@ -55,8 +56,8 @@ const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
 const isTryCloudflare = location.hostname.endsWith('.trycloudflare.com');
 const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth <= 720;
 const frameCheckMs = isMobileDevice ? 4000 : 2500;
-const missingFaceLimit = isMobileDevice ? 2 : 3;
-const multipleFaceLimit = isMobileDevice ? 2 : 1;
+const missingFaceLimit = isMobileDevice ? 4 : 3;
+const multipleFaceLimit = isMobileDevice ? 4 : 2;
 const isLanHttp = !window.isSecureContext && location.protocol === 'http:' && !isLocalHost && !isTryCloudflare;
 const isInsecurePublicTunnel = isTryCloudflare && location.protocol === 'http:';
 const lanOrigin = isInsecurePublicTunnel ? secureOrigin : location.origin;
@@ -319,6 +320,7 @@ async function sendFrame() {
     const data = await res.json();
     if (data.face_detected) {
       missingFaceFrames = 0;
+      multipleFaceFrames = 0;
       faceStatus.innerText = 'Face detected';
       emotionStatus.innerText = `Emotion: ${data.emotion} - ${data.confidence_hint}`;
     } else {
@@ -333,7 +335,7 @@ async function sendFrame() {
         missingFaceFrames = 0;
       }
     }
-    if (data.multiple_faces) {
+    if (data.multiple_faces && data.alert_level === 'danger') {
       multipleFaceFrames += 1;
       if (multipleFaceFrames >= multipleFaceLimit) {
         triggerAlarm(data.alert_reason || 'Suspicious camera activity: multiple faces detected.');
@@ -454,7 +456,7 @@ function requestFullscreenMode() {
 }
 
 window.addEventListener('blur', () => {
-  if (activeSection && proctoringActive) {
+  if (!isMobileDevice && activeSection && proctoringActive) {
     triggerAlarm('Window focus changed during interview.', 'focus-change');
   }
 });
@@ -483,7 +485,7 @@ function startSectionTimer() {
 }
 
 function updateTimerDisplay() {
-  const remaining = Math.max(sectionRemaining[activeSection] ?? SECTION_SECONDS, 0);
+  const remaining = Math.max(sectionRemaining[activeSection] ?? DEFAULT_SECTION_SECONDS, 0);
   const minutes = String(Math.floor(remaining / 60)).padStart(2, '0');
   const seconds = String(remaining % 60).padStart(2, '0');
   timerDisplay.innerText = `${minutes}:${seconds}`;

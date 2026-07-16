@@ -255,6 +255,8 @@ def init_db():
         ensure_column(conn, "users", "candidate_degree", "TEXT")
         ensure_column(conn, "roles", "allowed_degrees", "TEXT")
         ensure_column(conn, "roles", "allowed_question_sets", "TEXT")
+        ensure_column(conn, "roles", "aptitude_minutes", "INTEGER DEFAULT 20")
+        ensure_column(conn, "roles", "programming_minutes", "INTEGER DEFAULT 20")
         ensure_column(conn, "roles", "deleted_at", "TIMESTAMPTZ")
         ensure_column(conn, "roles", "deleted_by", "TEXT")
         ensure_column(conn, "interviews", "report_path", "TEXT")
@@ -325,9 +327,18 @@ def list_roles():
     with get_db() as conn:
         ensure_column(conn, "roles", "allowed_degrees", "TEXT")
         ensure_column(conn, "roles", "allowed_question_sets", "TEXT")
+        ensure_column(conn, "roles", "aptitude_minutes", "INTEGER DEFAULT 20")
+        ensure_column(conn, "roles", "programming_minutes", "INTEGER DEFAULT 20")
         ensure_column(conn, "roles", "deleted_at", "TIMESTAMPTZ")
         return conn.execute(
-            "SELECT role_id, role_slug, role_name, allowed_degrees, allowed_question_sets FROM roles WHERE deleted_at IS NULL ORDER BY role_id"
+            """
+            SELECT role_id, role_slug, role_name, allowed_degrees, allowed_question_sets,
+                   COALESCE(aptitude_minutes, 20) AS aptitude_minutes,
+                   COALESCE(programming_minutes, 20) AS programming_minutes
+            FROM roles
+            WHERE deleted_at IS NULL
+            ORDER BY role_id
+            """
         ).fetchall()
 
 
