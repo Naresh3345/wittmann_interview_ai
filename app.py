@@ -58,6 +58,15 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
 app.config["PREFERRED_URL_SCHEME"] = "https"
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
+
+@app.after_request
+def add_no_cache_headers(response):
+    if request.endpoint != "static":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 cv2_data = getattr(cv2, "data", None)
 haar_folder = getattr(cv2_data, "haarcascades", None) if cv2_data is not None else None
 if not haar_folder:
