@@ -785,6 +785,8 @@ def analyze_frame():
         result = {
             "face_detected": False,
             "multiple_faces": False,
+            "face_centered": False,
+            "face_box": None,
             "emotion": "Neutral",
             "confidence_hint": "Keep your face centered and maintain eye contact.",
             "alert_level": "warning",
@@ -795,6 +797,15 @@ def analyze_frame():
             x, y, w, h = max(faces, key=lambda r: r[2] * r[3])
             frame_area = gray.shape[0] * gray.shape[1]
             face_ratio = (w * h) / frame_area
+            frame_h, frame_w = gray.shape[:2]
+            face_center_x = (x + (w / 2)) / frame_w
+            face_center_y = (y + (h / 2)) / frame_h
+            face_centered = (
+                abs(face_center_x - 0.5) <= 0.18
+                and abs(face_center_y - 0.46) <= 0.22
+                and 0.06 <= face_ratio <= 0.55
+                and len(faces) == 1
+            )
             if 0.08 <= face_ratio <= 0.45:
                 stats["stable_frames"] += 1
             roi_gray = gray[y:y+h, x:x+w]
@@ -809,8 +820,17 @@ def analyze_frame():
             result = {
                 "face_detected": True,
                 "multiple_faces": len(faces) > 1,
+                "face_centered": face_centered,
+                "face_box": {
+                    "x": x / frame_w,
+                    "y": y / frame_h,
+                    "w": w / frame_w,
+                    "h": h / frame_h,
+                    "cx": face_center_x,
+                    "cy": face_center_y,
+                },
                 "emotion": emotion,
-                "confidence_hint": hint,
+                "confidence_hint": "Face is centered. You can start the test." if face_centered else "Move your face inside the center mark.",
                 "alert_level": "danger" if len(faces) > 1 else "ok",
                 "alert_reason": "Multiple faces detected in camera frame." if len(faces) > 1 else "",
             }

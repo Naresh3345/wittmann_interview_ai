@@ -36,6 +36,14 @@
       <strong>System Compatibility</strong>
       <ul id="compatibilityList"></ul>
       <p id="compatibilityMessage"></p>
+      <div class="face-center-panel" id="faceCenterPanel" hidden>
+        <div class="face-preview-wrap">
+          <video id="compatibilityVideo" autoplay muted playsinline></video>
+          <div class="face-center-guide" id="faceCenterGuide" aria-hidden="true"></div>
+        </div>
+        <div class="face-center-status" id="faceCenterStatus">Place your face inside the center mark.</div>
+        <canvas id="compatibilitySnapshot" width="360" height="270" hidden></canvas>
+      </div>
       <div class="lan-camera-guide browser-camera-guide" id="browserCameraGuide" hidden>
         <strong>Open in Mobile Browser</strong>
         <p>Gmail, WhatsApp, Instagram, and some in-app browsers can block camera and microphone access. Open this interview link in Safari or Chrome, then allow camera and microphone permissions.</p>
@@ -67,11 +75,19 @@
   const message = document.getElementById('compatibilityMessage');
   const startButton = document.getElementById('startRoleButton');
   const termsAccepted = document.getElementById('termsAccepted');
+  const roleInputs = document.querySelectorAll('input[name="role_id"]');
   const browserCameraGuide = document.getElementById('browserCameraGuide');
   const copyBrowserLinkButton = document.getElementById('copyBrowserLinkButton');
   const lanCameraGuide = document.getElementById('lanCameraGuide');
   const lanOriginValue = document.getElementById('lanOriginValue');
   const copyLanOriginButton = document.getElementById('copyLanOriginButton');
+  const faceCenterPanel = document.getElementById('faceCenterPanel');
+  const compatibilityVideo = document.getElementById('compatibilityVideo');
+  const compatibilitySnapshot = document.getElementById('compatibilitySnapshot');
+  const faceCenterGuide = document.getElementById('faceCenterGuide');
+  const faceCenterStatus = document.getElementById('faceCenterStatus');
+  let compatibilityReady = false;
+  let compatibilityStream = null;
 
   const secureOrigin = `https://${location.host}`;
   const secureCurrentUrl = `${secureOrigin}${location.pathname}${location.search}${location.hash}`;
@@ -128,12 +144,99 @@
     list.appendChild(item);
   }
 
+  function resetCompatibilityReady() {
+    compatibilityReady = false;
+    if (compatibilityStream) {
+      compatibilityStream.getTracks().forEach((track) => track.stop());
+      compatibilityStream = null;
+    }
+    if (compatibilityVideo) {
+      compatibilityVideo.srcObject = null;
+    }
+    startButton.textContent = 'Test Camera & Mic';
+    faceCenterGuide?.classList.remove('centered');
+    faceCenterGuide?.classList.add('not-centered');
+  }
+
+  roleInputs.forEach((input) => input.addEventListener('change', resetCompatibilityReady));
+  termsAccepted.addEventListener('change', resetCompatibilityReady);
+
+  function waitForVideoReady(video) {
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      video.addEventListener('loadedmetadata', resolve, { once: true });
+    });
+  }
+
+  async function analyzeCenterFrame() {
+    const ctx = compatibilitySnapshot.getContext('2d');
+    ctx.drawImage(compatibilityVideo, 0, 0, compatibilitySnapshot.width, compatibilitySnapshot.height);
+    const image = compatibilitySnapshot.toDataURL('image/jpeg', 0.7);
+    const response = await fetch('/api/analyze-frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image }),
+    });
+    return response.json();
+  }
+
+  async function runFaceCenterCheck(stream) {
+    faceCenterPanel.hidden = false;
+    faceCenterGuide.classList.remove('centered');
+    faceCenterGuide.classList.add('not-centered');
+    faceCenterStatus.textContent = 'Place your face inside the center mark.';
+    compatibilityVideo.srcObject = stream;
+    await compatibilityVideo.play().catch(() => {});
+    await waitForVideoReady(compatibilityVideo);
+
+    let centeredFrames = 0;
+    const maxChecks = 24;
+    for (let attempt = 0; attempt < maxChecks; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      let data;
+      try {
+        data = await analyzeCenterFrame();
+      } catch (error) {
+        data = { face_detected: false, face_centered: false, confidence_hint: 'Camera check failed. Please try again.' };
+      }
+
+      if (data.face_centered) {
+        centeredFrames += 1;
+        faceCenterGuide.classList.add('centered');
+        faceCenterGuide.classList.remove('not-centered');
+        faceCenterStatus.textContent = 'Face centered. Hold still for a moment.';
+      } else {
+        centeredFrames = 0;
+        faceCenterGuide.classList.remove('centered');
+        faceCenterGuide.classList.add('not-centered');
+        if (data.multiple_faces) {
+          faceCenterStatus.textContent = 'Only one candidate face should be visible.';
+        } else if (data.face_detected) {
+          faceCenterStatus.textContent = data.confidence_hint || 'Move your face inside the center mark.';
+        } else {
+          faceCenterStatus.textContent = 'No face detected. Move closer and place your face inside the mark.';
+        }
+      }
+
+      if (centeredFrames >= 3) {
+        faceCenterStatus.textContent = 'Face centered. You can start the test now.';
+        return true;
+      }
+    }
+    faceCenterStatus.textContent = 'Face is not centered. Adjust your position and test again.';
+    return false;
+  }
+
   async function runCompatibilityCheck() {
     panel.hidden = false;
     lanCameraGuide.hidden = true;
     browserCameraGuide.hidden = true;
+    faceCenterPanel.hidden = true;
     list.innerHTML = '';
-    message.textContent = 'Testing camera, microphone, and browser readiness...';
+    compatibilityReady = false;
+    message.textContent = 'Testing camera, microphone, browser readiness, and face position...';
     startButton.disabled = true;
     startButton.textContent = 'Testing Camera & Mic...';
 
@@ -150,7 +253,19 @@
     let stream;
     if (navigator.mediaDevices?.getUserMedia) {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        if (compatibilityStream) {
+          compatibilityStream.getTracks().forEach((track) => track.stop());
+          compatibilityStream = null;
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+          },
+          audio: true,
+        });
+        compatibilityStream = stream;
         mediaChecks.push(addCheck('Camera permission granted and working', stream.getVideoTracks().length > 0));
         mediaChecks.push(addCheck('Microphone permission granted and working', stream.getAudioTracks().length > 0));
       } catch (error) {
@@ -161,9 +276,6 @@
           lanCameraGuide.hidden = false;
         }
       } finally {
-        if (stream) {
-          stream.getTracks().forEach((track) => track.stop());
-        }
       }
     } else {
       if (isLanHttp) {
@@ -177,17 +289,30 @@
 
     const requiredPassed = requiredChecks.every(Boolean);
     const mediaPassed = mediaChecks.every(Boolean);
-    const canStart = requiredPassed && mediaPassed;
+    let faceCentered = false;
+    if (requiredPassed && mediaPassed && stream) {
+      message.textContent = 'Face center check is running. Place your face inside the mark.';
+      faceCentered = await runFaceCenterCheck(stream);
+      addCheck('Face is centered in camera frame', faceCentered);
+    }
+    const canStart = requiredPassed && mediaPassed && faceCentered;
+    if (stream && !canStart) {
+      stream.getTracks().forEach((track) => track.stop());
+      compatibilityStream = null;
+      compatibilityVideo.srcObject = null;
+    }
+
     if (requiredPassed && !mediaPassed && isLanHttp) {
       lanCameraGuide.hidden = false;
     } else if (requiredPassed && !mediaPassed) {
       browserCameraGuide.hidden = false;
     }
     message.textContent = requiredPassed
-      ? (mediaPassed ? 'All requirements are satisfied. Starting interview...' : 'Camera and microphone access are required before starting the interview.')
+      ? (canStart ? 'All requirements are satisfied. Click Start Test to begin.' : 'Camera, microphone, and centered face are required before starting the interview.')
       : 'Requirements failed. Please use a suitable browser and screen before starting.';
     startButton.disabled = false;
-    startButton.textContent = canStart ? 'Starting Interview...' : 'Test Camera & Mic Again';
+    startButton.textContent = canStart ? 'Start Test' : 'Test Camera & Mic Again';
+    compatibilityReady = canStart;
     return canStart;
   }
 
@@ -202,10 +327,14 @@
       roleForm.reportValidity();
       return;
     }
-    const passed = await runCompatibilityCheck();
-    if (passed) {
+    if (compatibilityReady) {
+      if (compatibilityStream) {
+        compatibilityStream.getTracks().forEach((track) => track.stop());
+      }
       roleForm.submit();
+      return;
     }
+    await runCompatibilityCheck();
   });
 </script>
 {% endblock %}
