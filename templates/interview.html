@@ -9,6 +9,11 @@
       <span id="faceStatus">Camera starting...</span>
       <small id="emotionStatus">Emotion: Waiting</small>
     </div>
+    <div class="lan-camera-guide compact-guide browser-camera-guide" id="browserCameraGuide" hidden>
+      <strong>Open in Mobile Browser</strong>
+      <p>In-app browsers can block camera access. Open this interview link in Safari or Chrome, then allow camera permission.</p>
+      <button class="btn ghost compact" id="copyBrowserLinkButton" type="button">Copy Secure Link</button>
+    </div>
     <div class="lan-camera-guide compact-guide" id="lanCameraGuide" hidden>
       <strong>Enable camera on LAN</strong>
       <ol>
@@ -45,7 +50,7 @@
         <h1>{{ role_name }} Interview</h1>
       </div>
       <div class="interview-actions">
-        <div class="progress"><span id="answeredCount">0</span>/{{ questions|length }} answered</div>
+        <div class="progress"><span id="progressSection">Aptitude</span>: <span id="answeredCount">0</span>/<span id="sectionQuestionCount">0</span> answered</div>
         <button class="btn ghost" id="nextSectionButton" type="button" hidden>Next: Programming</button>
         <button class="btn primary" id="submitInterviewButton" type="button" hidden>Submit Test</button>
       </div>
@@ -65,6 +70,15 @@
           <p>Programming questions open after you finish Aptitude.</p>
           <button class="btn primary" type="button" data-start-section="Programming" disabled>Locked</button>
         </article>
+      </section>
+
+      <section class="section-transition" id="programmingTransition" hidden>
+        <div>
+          <p class="eyebrow">Aptitude Completed</p>
+          <h2>Continue to Programming</h2>
+          <p>The Aptitude section is closed. Start the Programming section when you are ready.</p>
+        </div>
+        <button class="btn primary" id="startProgrammingButton" type="button">Next Programming Session</button>
       </section>
 
       {% set ns = namespace(current_category='', section_index=0) %}

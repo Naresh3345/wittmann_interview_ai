@@ -42,11 +42,12 @@ from utils.database import (
 )
 from utils.question_bank import ensure_question_bank_indexes, select_questions_for_role
 from utils.report import generate_pdf_report
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "questions.json"
-REPORT_DIR = BASE_DIR / "reports"
+REPORT_DIR = Path(os.getenv("REPORT_DIR", str(BASE_DIR / "reports"))).resolve()
 RESUME_DIR = REPORT_DIR / "resumes"
 DEFAULT_COMPANY_NAME = "WITTMANN BATTENFELD India Pvt. Ltd."
 ALLOWED_RESUME_EXTENSIONS = {".pdf", ".docx", ".txt"}
@@ -54,6 +55,8 @@ SHORTLIST_MIN_SCORE = float(os.getenv("SHORTLIST_MIN_SCORE", "70"))
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
+app.config["PREFERRED_URL_SCHEME"] = "https"
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 cv2_data = getattr(cv2, "data", None)
 haar_folder = getattr(cv2_data, "haarcascades", None) if cv2_data is not None else None
@@ -131,7 +134,7 @@ def clean_phone(raw_phone):
     digits = re.sub(r"\D", "", raw_phone)
     if len(digits) > 10 and digits.startswith("91"):
         digits = digits[-10:]
-    return digits if 7 <= len(digits) <= 15 else ""
+    return digits if len(digits) == 10 else ""
 
 
 def repair_pdf_word_spacing(text):
@@ -184,6 +187,7 @@ def parse_resume_details(text):
         "name": name,
         "email": extract_email(repaired_text),
         "phone": clean_phone(phone_match.group(0)) if phone_match else "",
+        "has_address": resume_has_address(text, ""),
     }
 
 
@@ -206,19 +210,103 @@ ROLE_RESUME_KEYWORDS = {
     },
 }
 
+DEGREE_ALIASES = {
+    "btech": "btech",
+    "bacheloroftechnology": "btech",
+    "be": "be",
+    "bachelorofengineering": "be",
+    "bsc": "bsc",
+    "bse": "bsc",
+    "bachelorofscience": "bsc",
+    "diploma": "diploma",
+    "mtech": "mtech",
+    "masteroftechnology": "mtech",
+    "me": "me",
+    "masterofengineering": "me",
+    "msc": "msc",
+    "masterofscience": "msc",
+    "bca": "bca",
+    "mca": "mca",
+    "mba": "mba",
+    "bcom": "bcom",
+}
+DEGREE_TEXT_PATTERNS = [
+    (r"\bb[\s.,-]*tech\b|\bbachelor\s+of\s+technology\b", "btech"),
+    (r"\bb[\s.,-]*e\b|\bbachelor\s+of\s+engineering\b", "be"),
+    (r"\bb[\s.,-]*sc\b|\bbse\b|\bbachelor\s+of\s+science\b", "bsc"),
+    (r"\bdiploma\b", "diploma"),
+    (r"\bm[\s.,-]*tech\b|\bmaster\s+of\s+technology\b", "mtech"),
+    (r"\bm[\s.,-]*e\b|\bmaster\s+of\s+engineering\b", "me"),
+    (r"\bm[\s.,-]*sc\b|\bmaster\s+of\s+science\b", "msc"),
+    (r"\bbca\b|\bbachelor\s+of\s+computer\s+applications\b", "bca"),
+    (r"\bmca\b|\bmaster\s+of\s+computer\s+applications\b", "mca"),
+    (r"\bmba\b|\bmaster\s+of\s+business\s+administration\b", "mba"),
+    (r"\bb[\s.,-]*com\b|\bbachelor\s+of\s+commerce\b", "bcom"),
+]
+
 
 def normalize_text(value):
     return re.sub(r"\s+", " ", value or "").strip()
 
 
+def normalize_degree(value):
+    compact = re.sub(r"[^a-z0-9]+", "", value or "", flags=re.IGNORECASE).lower()
+    return DEGREE_ALIASES.get(compact, compact)
+
+
+def parse_allowed_degrees(value):
+    return [item.strip() for item in re.split(r"[\n,|]+", value or "") if item.strip()]
+
+
+def degree_codes_from_text(value):
+    normalized = normalize_text(value).lower()
+    codes = {normalize_degree(part) for part in parse_allowed_degrees(value)}
+    for pattern, code in DEGREE_TEXT_PATTERNS:
+        if re.search(pattern, normalized, flags=re.IGNORECASE):
+            codes.add(code)
+    return {code for code in codes if code}
+
+
+def degree_matches_allowed(allowed_degrees, candidate_degree, resume_text):
+    allowed = [normalize_degree(item) for item in parse_allowed_degrees(allowed_degrees)]
+    allowed = [item for item in allowed if item]
+    if not allowed:
+        return True
+
+    candidate_codes = degree_codes_from_text(candidate_degree)
+    resume_codes = degree_codes_from_text(resume_text)
+    found_codes = candidate_codes | resume_codes
+    return any(degree in found_codes for degree in allowed)
+
+
+def allowed_degrees_label(allowed_degrees):
+    degrees = parse_allowed_degrees(allowed_degrees)
+    return ", ".join(degrees) if degrees else "any degree"
+
+
 def resume_has_address(text, candidate_location):
     normalized = normalize_text(text).lower()
+    searchable = re.sub(r"[^a-z0-9]+", " ", normalized)
     location = normalize_text(candidate_location).lower()
-    if location and location in normalized:
+    location_words = [
+        word
+        for word in re.findall(r"[a-z0-9]+", location)
+        if len(word) >= 3 and word not in {"near", "city", "dist", "district", "state", "india"}
+    ]
+    if location_words and any(re.search(rf"\b{re.escape(word)}\b", searchable) for word in location_words):
         return True
+
+    common_location_words = {
+        "chennai", "porur", "tambaram", "avadi", "kanchipuram", "coimbatore", "madurai",
+        "trichy", "tiruchirappalli", "salem", "vellore", "erode", "tirunelveli",
+        "bangalore", "bengaluru", "hyderabad", "pune", "mumbai", "delhi",
+    }
+    if any(re.search(rf"\b{re.escape(word)}\b", searchable) for word in common_location_words):
+        return True
+
     address_patterns = [
         r"\b(address|location|current\s+location|permanent\s+address|residing\s+at|residence)\b\s*[:\-]",
-        r"\b(street|road|nagar|colony|district|city|state|pincode|pin\s*code)\b",
+        r"\b(street|road|rd|nagar|colony|area|district|city|state|pincode|pin\s*code)\b",
         r"\b\d{6}\b",
     ]
     return any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in address_patterns)
@@ -378,7 +466,8 @@ def index():
             candidate_location = request.form.get("candidate_location", "").strip()
             candidate_degree = request.form.get("candidate_degree", "").strip()
             email = request.form.get("email", "").strip() or details["email"]
-            phone = request.form.get("phone", "").strip() or details["phone"]
+            raw_phone = request.form.get("phone", "").strip() or details["phone"]
+            phone = clean_phone(raw_phone)
             form_values = {
                 "name": name,
                 "email": email,
@@ -388,10 +477,12 @@ def index():
             }
             if not name or not candidate_location or not candidate_degree:
                 error = "Please enter candidate name, location, and degree before uploading the resume."
-            elif not email or not phone:
-                error = "Could not find email ID and phone number in the resume. Please enter the missing details and upload again."
-            elif not resume_has_address(resume_text, candidate_location):
-                error = "Resume does not contain an address or matching location. Please upload a resume with address details."
+            elif not email:
+                error = "Could not find email ID in the resume. Please enter the email ID and upload again."
+            elif raw_phone and not phone:
+                error = "Invalid phone number. Please enter exactly 10 digits."
+            elif not phone:
+                error = "Could not find phone number in the resume. Please enter a 10 digit phone number and upload again."
             else:
                 user_id = create_user(
                     name,
@@ -417,19 +508,33 @@ def index():
                     "phone": phone,
                     "candidate_location": candidate_location,
                     "candidate_degree": candidate_degree,
-                    "resume_path": resume_path,
+                    "resume_path": str(resume_path),
                     "sent": mail_result["sent"],
                     "mail_status": mail_result["status"],
                     "mail_error": mail_result["error"],
                     "test_link": test_link,
                     "expires_at": expires_at.strftime("%d-%m-%Y %I:%M %p"),
                 }
+                session["last_invite"] = invite
+                return redirect(url_for("invite_sent"))
     return render_template(
         "index.html",
         company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
         error=error,
         invite=invite,
         form_values=form_values,
+    )
+
+
+@app.route("/invite-sent")
+def invite_sent():
+    invite = session.get("last_invite")
+    if not invite:
+        return redirect(url_for("index"))
+    return render_template(
+        "invite_sent.html",
+        invite=invite,
+        company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
 
@@ -491,7 +596,9 @@ def api_parse_resume():
             temp_path = Path(temp_file.name)
         resume_text = extract_resume_text(temp_path)
         details = parse_resume_details(resume_text)
-        details["has_address"] = resume_has_address(resume_text, "")
+        candidate_location = request.form.get("candidate_location", "").strip()
+        details["has_address"] = resume_has_address(resume_text, candidate_location)
+        details["address_required"] = False
         return jsonify(details)
     finally:
         if temp_path and temp_path.exists():
@@ -535,7 +642,10 @@ def select_role():
     if "user_id" not in session:
         return redirect(url_for("index"))
     roles = list_roles()
-    error = "You cannot attend this interview. Your resume is not matching with the selected role." if request.args.get("role_error") == "mismatch" else ""
+    if request.args.get("role_error") == "degree":
+        error = "You cannot attend this interview. Your degree is not eligible for the selected role."
+    else:
+        error = ""
     if request.method == "POST":
         role_id = int(request.form.get("role_id", 0))
         terms_accepted = request.form.get("terms_accepted") == "yes"
@@ -554,10 +664,12 @@ def select_role():
             error = "Please accept the terms and conditions before starting the interview."
         elif selected:
             role_slug = selected.get("role_slug") if isinstance(selected, dict) else getattr(selected, "role_slug", None)
+            allowed_degrees = selected.get("allowed_degrees") if isinstance(selected, dict) else getattr(selected, "allowed_degrees", "")
             resume_path = session.get("candidate", {}).get("resume_path", "")
             resume_text = extract_resume_text(resume_path) if resume_path else ""
-            if not role_matches_resume(role_slug, resume_text):
-                error = "You cannot attend this interview. Your resume is not matching with the selected role."
+            candidate_degree = session.get("candidate", {}).get("candidate_degree", "")
+            if not degree_matches_allowed(allowed_degrees, candidate_degree, resume_text):
+                error = f"You cannot attend this interview. This role allows only {allowed_degrees_label(allowed_degrees)} candidates."
             else:
                 session["role_id"] = role_id
                 # selected may be a dict or an object; handle both
@@ -593,15 +705,19 @@ def interview():
     role_slug = role.get("role_slug") if isinstance(role, dict) else getattr(role, "role_slug", None)
     if not role_slug:
         return redirect(url_for("select_role"))
+    allowed_degrees = role.get("allowed_degrees") if isinstance(role, dict) else getattr(role, "allowed_degrees", "")
+    allowed_degrees = allowed_degrees or ""
+    allowed_question_sets = role.get("allowed_question_sets") if isinstance(role, dict) else getattr(role, "allowed_question_sets", "")
+    allowed_question_sets = allowed_question_sets or ""
     resume_path = session.get("candidate", {}).get("resume_path", "")
     resume_text = extract_resume_text(resume_path) if resume_path else ""
-    if not role_matches_resume(role_slug, resume_text):
+    candidate_degree = session.get("candidate", {}).get("candidate_degree", "")
+    if not degree_matches_allowed(allowed_degrees, candidate_degree, resume_text):
         session.pop("role_id", None)
         session.pop("role_name", None)
         session.pop("terms_accepted", None)
-        return redirect(url_for("select_role", role_error="mismatch"))
-
-    questions = select_questions_for_role(role_slug)
+        return redirect(url_for("select_role", role_error="degree"))
+    questions = select_questions_for_role(role_slug, allowed_question_sets=allowed_question_sets)
     save_interview_questions(interview_id, questions)
 
     return render_template(
@@ -662,7 +778,7 @@ def analyze_frame():
         if frame is None:
             raise ValueError("Unable to decode image data")
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.2, 5, minSize=(60, 60))
+        faces = face_cascade.detectMultiScale(gray, 1.1, 4, minSize=(45, 45))
         stats = session.get("face_stats", {"total_frames": 0, "detected_frames": 0, "smile_frames": 0, "stable_frames": 0})
         stats["total_frames"] += 1
 

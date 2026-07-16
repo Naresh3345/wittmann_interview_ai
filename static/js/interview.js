@@ -15,15 +15,23 @@ const proctoringNotice = document.getElementById('proctoringNotice');
 const acceptProctoringNotice = document.getElementById('acceptProctoringNotice');
 const cancelProctoringNotice = document.getElementById('cancelProctoringNotice');
 const lanCameraGuide = document.getElementById('lanCameraGuide');
+const browserCameraGuide = document.getElementById('browserCameraGuide');
 const lanOriginValue = document.getElementById('lanOriginValue');
 const copyLanOriginButton = document.getElementById('copyLanOriginButton');
+const copyBrowserLinkButton = document.getElementById('copyBrowserLinkButton');
 const sectionLauncher = document.getElementById('sectionLauncher');
 const nextSectionButton = document.getElementById('nextSectionButton');
 const submitInterviewButton = document.getElementById('submitInterviewButton');
 const programmingLauncher = document.getElementById('programmingLauncher');
+const programmingTransition = document.getElementById('programmingTransition');
+const startProgrammingButton = document.getElementById('startProgrammingButton');
+const progressSection = document.getElementById('progressSection');
+const answeredCountDisplay = document.getElementById('answeredCount');
+const sectionQuestionCount = document.getElementById('sectionQuestionCount');
 let activeAnswerId = `answer-${window.QUESTIONS[0]?.id || 1}`;
 let proctoringViolations = [];
 let missingFaceFrames = 0;
+let multipleFaceFrames = 0;
 let audioContext;
 let warningTotal = 0;
 let tabSwitchTotal = 0;
@@ -36,12 +44,26 @@ let frameInterval;
 let proctoringNoticeAccepted = false;
 let aptitudeCompleted = false;
 const SECTION_SECONDS = 20 * 60;
+const MIN_APTITUDE_ANSWERS = 5;
 const sectionRemaining = {
   Aptitude: SECTION_SECONDS,
   Programming: SECTION_SECONDS,
 };
-const isLanHttp = !window.isSecureContext && location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
-const lanOrigin = location.origin;
+const secureOrigin = `https://${location.host}`;
+const secureCurrentUrl = `${secureOrigin}${location.pathname}${location.search}${location.hash}`;
+const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
+const isTryCloudflare = location.hostname.endsWith('.trycloudflare.com');
+const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth <= 720;
+const frameCheckMs = isMobileDevice ? 4000 : 2500;
+const missingFaceLimit = isMobileDevice ? 5 : 3;
+const multipleFaceLimit = isMobileDevice ? 2 : 1;
+const isLanHttp = !window.isSecureContext && location.protocol === 'http:' && !isLocalHost && !isTryCloudflare;
+const isInsecurePublicTunnel = isTryCloudflare && location.protocol === 'http:';
+const lanOrigin = isInsecurePublicTunnel ? secureOrigin : location.origin;
+
+if (isInsecurePublicTunnel) {
+  window.location.replace(secureCurrentUrl);
+}
 
 if (lanOriginValue) {
   lanOriginValue.textContent = lanOrigin;
@@ -59,9 +81,27 @@ copyLanOriginButton?.addEventListener('click', async () => {
   }, 1800);
 });
 
+copyBrowserLinkButton?.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(window.isSecureContext ? location.href : secureCurrentUrl);
+    copyBrowserLinkButton.textContent = 'Copied';
+  } catch (error) {
+    copyBrowserLinkButton.textContent = 'Copy Failed';
+  }
+  setTimeout(() => {
+    copyBrowserLinkButton.textContent = 'Copy Secure Link';
+  }, 1800);
+});
+
 function showLanCameraGuide() {
   if (lanCameraGuide && isLanHttp) {
     lanCameraGuide.hidden = false;
+  }
+}
+
+function showBrowserCameraGuide() {
+  if (browserCameraGuide && !isLanHttp) {
+    browserCameraGuide.hidden = false;
   }
 }
 
@@ -71,8 +111,10 @@ document.querySelectorAll('[data-start-section]').forEach((button) => {
 
 nextSectionButton?.addEventListener('click', () => {
   aptitudeCompleted = true;
-  startSection('Programming');
+  showProgrammingTransition();
 });
+
+startProgrammingButton?.addEventListener('click', () => startSection('Programming'));
 
 submitInterviewButton?.addEventListener('click', () => submitInterview());
 
@@ -82,19 +124,37 @@ document.querySelectorAll('textarea').forEach((textarea) => {
   });
 });
 
+document.addEventListener('copy', (event) => event.preventDefault());
+document.addEventListener('cut', (event) => event.preventDefault());
+document.addEventListener('paste', (event) => event.preventDefault());
+document.addEventListener('contextmenu', (event) => event.preventDefault());
+document.addEventListener('selectstart', (event) => {
+  if (!event.target.closest('textarea, input')) {
+    event.preventDefault();
+  }
+});
+
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
     faceStatus.innerText = 'Camera monitoring unavailable.';
-    emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Text scoring enabled';
+    emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Open in Safari or Chrome';
     alarmMessage.innerText = isLanHttp
       ? 'Chrome blocks camera on LAN HTTP. Apply the Chrome secure-origin setting shown above.'
-      : 'Camera monitoring is unavailable in this browser or connection.';
+      : 'This browser does not allow camera access. Open the secure interview link in Safari or Chrome, not inside Gmail or another app browser.';
     showLanCameraGuide();
+    showBrowserCameraGuide();
     return;
   }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'user',
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+      },
+      audio: false,
+    });
     video.srcObject = stream;
     cameraReady = true;
     faceStatus.innerText = 'Camera enabled';
@@ -108,6 +168,9 @@ async function startCamera() {
       ? 'Chrome blocks camera on LAN HTTP. Apply the Chrome secure-origin setting shown above.'
       : 'Camera permission was denied or the camera is unavailable.';
     showLanCameraGuide();
+    if (!isLanHttp) {
+      showBrowserCameraGuide();
+    }
   }
 }
 
@@ -141,7 +204,7 @@ function armProctoring() {
   alarmMessage.innerText = 'Monitoring camera and tab focus.';
   emotionStatus.innerText = 'Monitoring active';
   if (!frameInterval) {
-    frameInterval = setInterval(sendFrame, 2500);
+    frameInterval = setInterval(sendFrame, frameCheckMs);
   }
 }
 
@@ -181,12 +244,45 @@ function showWarningPopup(reason) {
   }, 3500);
 }
 
+function getActiveQuestionContext() {
+  if (!activeSection) {
+    return {
+      question_id: '',
+      question_number: '',
+      question_category: '',
+      question_text: '',
+    };
+  }
+  const activeElement = document.activeElement;
+  let questionCard = activeElement?.closest?.('.question-card');
+  if (!questionCard || questionCard.hidden || questionCard.dataset.section !== activeSection) {
+    questionCard = document.querySelector(`.question-card[data-section="${activeSection}"]:not([hidden])`);
+  }
+  if (!questionCard) {
+    return {
+      question_id: '',
+      question_number: '',
+      question_category: activeSection,
+      question_text: '',
+    };
+  }
+  const visibleQuestionCards = [...document.querySelectorAll(`.question-card[data-section="${activeSection}"]`)];
+  const questionIndex = visibleQuestionCards.indexOf(questionCard);
+  return {
+    question_id: questionCard.dataset.questionId || '',
+    question_number: questionIndex >= 0 ? questionIndex + 1 : '',
+    question_category: activeSection,
+    question_text: questionCard.querySelector('h3')?.innerText?.trim() || '',
+  };
+}
+
 function triggerAlarm(reason, kind = 'warning') {
   if (submitted || !proctoringActive) return;
   const event = {
     reason,
     kind,
     time: new Date().toISOString(),
+    ...getActiveQuestionContext(),
   };
   proctoringViolations.push(event);
   warningTotal += 1;
@@ -229,13 +325,19 @@ async function sendFrame() {
       missingFaceFrames += 1;
       faceStatus.innerText = 'Face not centered';
       emotionStatus.innerText = data.confidence_hint || 'Adjust camera position';
-      if (missingFaceFrames >= 2) {
-        triggerAlarm('Suspicious camera activity: candidate face is missing or not centered.');
+      if (missingFaceFrames >= missingFaceLimit) {
+        triggerAlarm('Suspicious camera activity: candidate face is continuously missing or fully turned away.');
         missingFaceFrames = 0;
       }
     }
     if (data.multiple_faces) {
-      triggerAlarm(data.alert_reason || 'Suspicious camera activity: multiple faces detected.');
+      multipleFaceFrames += 1;
+      if (multipleFaceFrames >= multipleFaceLimit) {
+        triggerAlarm(data.alert_reason || 'Suspicious camera activity: multiple faces detected.');
+        multipleFaceFrames = 0;
+      }
+    } else {
+      multipleFaceFrames = 0;
     }
   } catch (e) {}
 }
@@ -261,6 +363,9 @@ async function startSection(sectionName) {
     item.hidden = item.dataset.section !== sectionName;
   });
   sectionLauncher.hidden = true;
+  if (programmingTransition) {
+    programmingTransition.hidden = true;
+  }
   nextSectionButton.hidden = sectionName !== 'Aptitude';
   submitInterviewButton.hidden = sectionName !== 'Programming';
   updateSectionActions();
@@ -285,13 +390,39 @@ function isSectionAnswered(sectionName) {
   return sectionQuestions.length > 0 && sectionQuestions.every(isQuestionAnswered);
 }
 
+function sectionAnsweredCount(sectionName) {
+  return window.QUESTIONS.filter((q) => q.category === sectionName && isQuestionAnswered(q)).length;
+}
+
+function sectionQuestionTotal(sectionName) {
+  return window.QUESTIONS.filter((q) => q.category === sectionName).length;
+}
+
 function updateSectionActions() {
   if (nextSectionButton) {
-    nextSectionButton.disabled = activeSection !== 'Aptitude' || !isSectionAnswered('Aptitude');
+    nextSectionButton.disabled = activeSection !== 'Aptitude' || sectionAnsweredCount('Aptitude') < MIN_APTITUDE_ANSWERS;
   }
   if (submitInterviewButton) {
     submitInterviewButton.disabled = activeSection !== 'Programming' || !isSectionAnswered('Programming');
   }
+}
+
+function showProgrammingTransition() {
+  activeSection = '';
+  clearInterval(timerInterval);
+  document.querySelectorAll('.test-section').forEach((item) => {
+    item.hidden = true;
+  });
+  sectionLauncher.hidden = true;
+  if (programmingTransition) {
+    programmingTransition.hidden = false;
+  }
+  nextSectionButton.hidden = true;
+  submitInterviewButton.hidden = true;
+  timerSection.innerText = 'Aptitude completed';
+  progressSection.innerText = 'Programming';
+  answeredCountDisplay.innerText = '0';
+  sectionQuestionCount.innerText = sectionQuestionTotal('Programming');
 }
 
 function showSectionLauncher() {
@@ -299,6 +430,9 @@ function showSectionLauncher() {
     item.hidden = true;
   });
   sectionLauncher.hidden = false;
+  if (programmingTransition) {
+    programmingTransition.hidden = true;
+  }
   if (programmingLauncher && aptitudeCompleted) {
     programmingLauncher.classList.remove('locked');
     const button = programmingLauncher.querySelector('button');
@@ -336,7 +470,7 @@ function startSectionTimer() {
         nextSectionButton.hidden = true;
         submitInterviewButton.hidden = true;
         timerSection.innerText = 'Aptitude completed';
-        showSectionLauncher();
+        showProgrammingTransition();
         showWarningPopup('Aptitude time ended. Please start Programming.');
       } else {
         submitInterview(`${activeSection} time limit ended. Test auto submitted.`);
@@ -353,8 +487,11 @@ function updateTimerDisplay() {
 }
 
 function updateAnsweredCount() {
-  const count = window.QUESTIONS.filter(isQuestionAnswered).length;
-  document.getElementById('answeredCount').innerText = count;
+  const sectionName = activeSection || (aptitudeCompleted ? 'Programming' : 'Aptitude');
+  const count = sectionAnsweredCount(sectionName);
+  progressSection.innerText = sectionName;
+  sectionQuestionCount.innerText = sectionQuestionTotal(sectionName);
+  answeredCountDisplay.innerText = count;
   updateSectionActions();
 }
 

@@ -135,7 +135,7 @@ QUESTION_TOPICS = {
     },
 }
 
-SECTION_COUNTS = {"Aptitude": 15, "Programming": 3}
+SECTION_COUNTS = {"Aptitude": 30, "Programming": 5}
 
 
 @contextmanager
@@ -151,7 +151,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS roles (
                 role_id SERIAL PRIMARY KEY,
                 role_slug TEXT NOT NULL UNIQUE,
-                role_name TEXT NOT NULL
+                role_name TEXT NOT NULL,
+                allowed_degrees TEXT
             )
             """
         )
@@ -252,6 +253,10 @@ def init_db():
         ensure_column(conn, "users", "resume_path", "TEXT")
         ensure_column(conn, "users", "candidate_location", "TEXT")
         ensure_column(conn, "users", "candidate_degree", "TEXT")
+        ensure_column(conn, "roles", "allowed_degrees", "TEXT")
+        ensure_column(conn, "roles", "allowed_question_sets", "TEXT")
+        ensure_column(conn, "roles", "deleted_at", "TIMESTAMPTZ")
+        ensure_column(conn, "roles", "deleted_by", "TEXT")
         ensure_column(conn, "interviews", "report_path", "TEXT")
         ensure_column(conn, "interviews", "shortlist_status", "TEXT")
         ensure_column(conn, "interviews", "shortlist_reason", "TEXT")
@@ -318,7 +323,12 @@ def seed_question_patterns(conn):
 
 def list_roles():
     with get_db() as conn:
-        return conn.execute("SELECT role_id, role_slug, role_name FROM roles ORDER BY role_id").fetchall()
+        ensure_column(conn, "roles", "allowed_degrees", "TEXT")
+        ensure_column(conn, "roles", "allowed_question_sets", "TEXT")
+        ensure_column(conn, "roles", "deleted_at", "TIMESTAMPTZ")
+        return conn.execute(
+            "SELECT role_id, role_slug, role_name, allowed_degrees, allowed_question_sets FROM roles WHERE deleted_at IS NULL ORDER BY role_id"
+        ).fetchall()
 
 
 def create_user(name, email, phone, resume_path="", candidate_location="", candidate_degree=""):

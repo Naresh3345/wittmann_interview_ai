@@ -122,6 +122,43 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
     story.append(Paragraph(f"Reason: {escape(face_summary.get('shortlist_reason', ''))}", normal_style))
     story.append(Spacer(1, 12))
 
+    if violations:
+        story.append(Paragraph("Warning Popup Details", heading_style))
+        warning_rows = [
+            [
+                _paragraph("No", table_header_style),
+                _paragraph("Question", table_header_style),
+                _paragraph("Warning", table_header_style),
+                _paragraph("Time", table_header_style),
+            ]
+        ]
+        for idx, item in enumerate(violations, start=1):
+            question_number = item.get("question_number") or "-"
+            question_category = item.get("question_category") or "-"
+            question_text = item.get("question_text") or "Question not captured"
+            question_label = f"{question_category} Q{question_number}: {question_text}"
+            warning_rows.append([
+                _paragraph(str(idx), table_cell_style),
+                _paragraph(question_label, table_cell_style),
+                _paragraph(item.get("reason", ""), table_cell_style),
+                _paragraph(item.get("time", ""), table_cell_style),
+            ])
+        warning_table = LongTable(warning_rows, colWidths=[30, doc.width * 0.42, doc.width * 0.36, doc.width * 0.16], repeatRows=1)
+        warning_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#7f1d1d")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#fecaca")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#fff7ed")]),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(warning_table)
+        story.append(Spacer(1, 14))
+
     data = [
         [
             _paragraph("Q.No", table_header_style),

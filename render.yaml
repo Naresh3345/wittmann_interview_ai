@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: wittmann-interview-ai
+    runtime: python
+    plan: starter
+    buildCommand: python -m pip install -r requirements.txt
+    startCommand: python -m gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.2
+      - key: ENABLE_HTTPS
+        value: "0"
+      - key: REPORT_DIR
+        value: /var/data/reports
+      - key: COMPANY_NAME
+        value: WITTMANN BATTENFELD India Pvt. Ltd.
+      - key: SHORTLIST_MIN_SCORE
+        value: "70"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_REPORT_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: wittmann-interview-db
+          property: connectionString
+    disk:
+      name: wittmann-interview-files
+      mountPath: /var/data
+      sizeGB: 1
+
+databases:
+  - name: wittmann-interview-db
+    plan: starter

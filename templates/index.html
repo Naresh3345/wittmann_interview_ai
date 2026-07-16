@@ -4,7 +4,7 @@
   <section class="login-copy">
     <p class="eyebrow">Step 1</p>
     <h1>Upload Resume</h1>
-    <p class="subtitle">Enter candidate name, location, and degree before uploading the resume. The system verifies address details, extracts email ID and phone number, then sends a 5-minute interview test link.</p>
+    <p class="subtitle">Enter candidate name, location, and degree before uploading the resume. The system extracts email ID and phone number, then sends a 5-minute interview test link.</p>
   </section>
 
   <section class="form-panel">
@@ -55,7 +55,8 @@
       <input id="email" name="email" type="email" value="{{ form_values.email }}" placeholder="candidate@example.com">
 
       <label for="phone">Phone Number</label>
-      <input id="phone" name="phone" type="tel" value="{{ form_values.phone }}" placeholder="Enter phone number">
+      <input id="phone" name="phone" type="tel" inputmode="numeric" minlength="10" maxlength="10" pattern="[0-9]{10}" value="{{ form_values.phone }}" placeholder="Enter 10 digit phone number">
+      <p class="form-hint" id="phoneValidationHint">Phone number must contain exactly 10 digits.</p>
 
       <button class="btn primary full" type="submit">Upload & Send Test Link</button>
     </form>
@@ -76,8 +77,20 @@
   const locationInput = document.getElementById('candidate_location');
   const degreeInput = document.getElementById('candidate_degree');
   const parseStatus = document.getElementById('resumeParseStatus');
+  const phoneValidationHint = document.getElementById('phoneValidationHint');
   let parsedCurrentFile = false;
-  let resumeHasAddress = false;
+
+  function normalizePhoneInput() {
+    phoneInput.value = phoneInput.value.replace(/\D/g, '').slice(0, 10);
+    const valid = phoneInput.value.length === 10;
+    phoneValidationHint.textContent = valid
+      ? 'Valid 10 digit phone number.'
+      : 'Phone number must contain exactly 10 digits.';
+    phoneValidationHint.className = valid ? 'form-hint success-text' : 'form-hint error-text';
+    return valid;
+  }
+
+  phoneInput?.addEventListener('input', normalizePhoneInput);
 
   async function parseSelectedResume() {
     const file = resumeInput.files?.[0];
@@ -86,6 +99,7 @@
     parseStatus.textContent = 'Reading resume details...';
     const formData = new FormData();
     formData.append('resume', file);
+    formData.append('candidate_location', locationInput.value.trim());
 
     try {
       const response = await fetch('/api/parse-resume', {
@@ -99,12 +113,10 @@
 
       if (details.name) nameInput.value = details.name;
       if (details.email) emailInput.value = details.email;
-      if (details.phone) phoneInput.value = details.phone;
-      resumeHasAddress = Boolean(details.has_address);
-      if (!details.has_address) {
-        alert('Resume does not contain address or location details. Please upload a resume with address details.');
+      if (details.phone) {
+        phoneInput.value = String(details.phone).replace(/\D/g, '').slice(-10);
+        normalizePhoneInput();
       }
-
       const missing = ['name', 'email', 'phone'].filter((field) => !details[field]);
       parseStatus.textContent = missing.length
         ? `Auto-filled available details. Please type missing ${missing.join(', ')}.`
@@ -119,7 +131,6 @@
 
   resumeInput?.addEventListener('change', async () => {
     parsedCurrentFile = false;
-    resumeHasAddress = false;
     await parseSelectedResume();
   });
 
@@ -129,12 +140,12 @@
       alert('Please enter candidate name, location, and degree before uploading the resume.');
       return;
     }
-    if (!resumeHasAddress && parsedCurrentFile) {
+    if (!normalizePhoneInput()) {
       event.preventDefault();
-      alert('Resume does not contain address or location details. Please upload a resume with address details.');
+      alert('Invalid phone number. Please enter exactly 10 digits.');
+      phoneInput.focus();
       return;
     }
-
     const needsDetails = !emailInput.value.trim() || !phoneInput.value.trim();
     if (needsDetails && !parsedCurrentFile) {
       event.preventDefault();

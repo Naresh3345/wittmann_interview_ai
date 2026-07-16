@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="completion-layout invite-sent-layout">
+  <section class="notice-dialog invite-sent-dialog" role="dialog" aria-modal="true" aria-labelledby="inviteSentTitle">
+    <p class="eyebrow">Test Link</p>
+    {% if invite.sent %}
+    <h1 id="inviteSentTitle">Test Link Sent</h1>
+    <p class="subtitle">The interview test link has been sent to <strong>{{ invite.email }}</strong>.</p>
+    {% else %}
+    <h1 id="inviteSentTitle">Test Link Created</h1>
+    <p class="subtitle">The interview test link was created, but the email could not be sent to <strong>{{ invite.email }}</strong>.</p>
+    {% endif %}
+
+    <div class="candidate-summary invite-summary">
+      <strong>{{ invite.name }}</strong>
+      <span>{{ invite.email }}</span>
+      <span>{{ invite.phone }}</span>
+      <small>This link will expire in 5 minutes. Expiry time: {{ invite.expires_at }}.</small>
+    </div>
+
+    {% if not invite.sent %}
+    <p class="notice warning">Email delivery failed. Use this development link manually:</p>
+    <a class="table-link invite-link" href="{{ invite.test_link }}">{{ invite.test_link }}</a>
+    {% if invite.mail_error %}
+    <p class="form-hint">{{ invite.mail_error }}</p>
+    {% endif %}
+    {% endif %}
+
+    <div class="notice-actions">
+      <a class="btn primary" href="{{ url_for('index') }}">Upload Another Resume</a>
+    </div>
+  </section>
+</main>
+{% endblock %}

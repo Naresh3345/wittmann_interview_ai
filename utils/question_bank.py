@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 from utils.database import get_db
 
 
-SECTION_COUNTS = {"Aptitude": 15, "Programming": 3}
+SECTION_COUNTS = {"Aptitude": 30, "Programming": 5}
 
 
 def ensure_question_bank_indexes():
@@ -19,6 +19,7 @@ def ensure_question_bank_indexes():
                 question_id SERIAL PRIMARY KEY,
                 question_code TEXT UNIQUE,
                 role_slug TEXT NOT NULL,
+                question_set TEXT NOT NULL DEFAULT 'Set 1',
                 section TEXT NOT NULL,
                 topic TEXT NOT NULL,
                 difficulty TEXT NOT NULL DEFAULT 'Medium',
@@ -35,8 +36,24 @@ def ensure_question_bank_indexes():
             )
             """
         )
+        conn.execute("ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS question_set TEXT NOT NULL DEFAULT 'Set 1'")
+        conn.execute("ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS deleted_by TEXT")
+        conn.execute(
+            """
+            UPDATE question_bank
+            SET question_set = CASE
+                WHEN question_code ILIKE '%set5%' THEN 'Set 5'
+                WHEN question_set IS NULL OR btrim(question_set) = '' THEN 'Set 1'
+                ELSE question_set
+            END
+            """
+        )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS question_bank_role_section_active_idx ON question_bank (role_slug, section, active)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS question_bank_role_set_section_active_idx ON question_bank (role_slug, question_set, section, active)"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS question_bank_role_topic_idx ON question_bank (role_slug, topic)")
 
@@ -44,6 +61,7 @@ def ensure_question_bank_indexes():
 def normalize_question(row):
     return {
         "id": str(row["question_id"]),
+        "set": row.get("question_set", "Set 1"),
         "category": row["section"],
         "difficulty": row.get("difficulty", "Medium"),
         "question": row["question_text"],
@@ -62,37 +80,66 @@ def assignment_sort_key(item):
     return (item.get("assignment_count", 0), last_assigned_value, random.random())
 
 
-def select_questions_for_role(role_slug, excluded_ids=None):
+def parse_question_sets(value):
+    if not value:
+        return []
+    items = []
+    for part in str(value).replace("|", ",").replace("\n", ",").split(","):
+        label = part.strip()
+        if not label:
+            continue
+        if label.isdigit():
+            label = f"Set {label}"
+        elif label.lower().startswith("set"):
+            digits = "".join(ch for ch in label if ch.isdigit())
+            label = f"Set {digits}" if digits else label
+        if label.lower() not in {item.lower() for item in items}:
+            items.append(label)
+    return items
+
+
+def active_sets_for_role(conn, role_slug):
+    rows = conn.execute(
+        """
+        SELECT DISTINCT question_set
+        FROM question_bank
+        WHERE role_slug = %s AND active = TRUE AND deleted_at IS NULL
+        ORDER BY question_set
+        """,
+        (role_slug,),
+    ).fetchall()
+    return [row["question_set"] for row in rows if row["question_set"]]
+
+
+def select_questions_for_role(role_slug, excluded_ids=None, allowed_question_sets=""):
     excluded_ids = {int(value) for value in (excluded_ids or set()) if str(value).isdigit()}
     selected = []
     now = datetime.now()
 
     with get_db() as conn:
-        for section, count in SECTION_COUNTS.items():
-            params = [role_slug, section]
+        question_sets = parse_question_sets(allowed_question_sets)
+        if question_sets:
+            params = [role_slug, question_sets]
             excluded_sql = ""
             if excluded_ids:
                 excluded_sql = "AND question_id <> ALL(%s)"
                 params.append(list(excluded_ids))
-            pool = conn.execute(
+            selected = conn.execute(
                 f"""
                 SELECT *
                 FROM question_bank
                 WHERE role_slug = %s
-                  AND section = %s
+                  AND question_set = ANY(%s)
                   AND active = TRUE
+                  AND deleted_at IS NULL
                   {excluded_sql}
                 """,
                 tuple(params),
             ).fetchall()
-            if len(pool) < count:
+            if not selected:
                 raise ValueError(
-                    f"PostgreSQL question bank has only {len(pool)} active {section} questions for role '{role_slug}'. "
-                    f"At least {count} are required."
+                    f"No active questions are available for role '{role_slug}' in selected sets: {', '.join(question_sets)}."
                 )
-            pool.sort(key=assignment_sort_key)
-            chosen = pool[:count]
-            selected.extend(chosen)
             conn.execute(
                 """
                 UPDATE question_bank
@@ -101,10 +148,47 @@ def select_questions_for_role(role_slug, excluded_ids=None):
                     updated_at = %s
                 WHERE question_id = ANY(%s)
                 """,
-                (now, now, [item["question_id"] for item in chosen]),
+                (now, now, [item["question_id"] for item in selected]),
             )
+        else:
+            for section, count in SECTION_COUNTS.items():
+                params = [role_slug, section]
+                excluded_sql = ""
+                if excluded_ids:
+                    excluded_sql = "AND question_id <> ALL(%s)"
+                    params.append(list(excluded_ids))
+                pool = conn.execute(
+                    f"""
+                    SELECT *
+                    FROM question_bank
+                    WHERE role_slug = %s
+                      AND section = %s
+                      AND active = TRUE
+                      AND deleted_at IS NULL
+                      {excluded_sql}
+                    """,
+                    tuple(params),
+                ).fetchall()
+                if len(pool) < count:
+                    raise ValueError(
+                        f"PostgreSQL question bank has only {len(pool)} active {section} questions for role '{role_slug}'. "
+                        f"At least {count} are required."
+                    )
+                pool.sort(key=assignment_sort_key)
+                chosen = pool[:count]
+                selected.extend(chosen)
+                conn.execute(
+                    """
+                    UPDATE question_bank
+                    SET assignment_count = assignment_count + 1,
+                        last_assigned_at = %s,
+                        updated_at = %s
+                    WHERE question_id = ANY(%s)
+                    """,
+                    (now, now, [item["question_id"] for item in chosen]),
+                )
 
-    selected.sort(key=lambda item: (0 if item["section"] == "Aptitude" else 1, random.random()))
+    random.shuffle(selected)
     return [normalize_question(item) for item in selected]
 
 
@@ -124,11 +208,12 @@ def import_questions_from_json(path):
             conn.execute(
                 """
                 INSERT INTO question_bank
-                    (question_code, role_slug, section, topic, difficulty, question_text,
+                    (question_code, role_slug, question_set, section, topic, difficulty, question_text,
                      options, correct_answer, keywords, marks, active, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (question_code) DO UPDATE SET
                     role_slug = EXCLUDED.role_slug,
+                    question_set = EXCLUDED.question_set,
                     section = EXCLUDED.section,
                     topic = EXCLUDED.topic,
                     difficulty = EXCLUDED.difficulty,
@@ -143,6 +228,7 @@ def import_questions_from_json(path):
                 (
                     item["question_code"],
                     item["role_slug"],
+                    item.get("question_set", "Set 1"),
                     item["section"],
                     item["topic"],
                     item.get("difficulty", "Medium"),

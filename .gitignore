@@ -4,5 +4,9 @@ __pycache__/
 .certs/
 data/*.db
 reports/*.pdf
+reports/resumes/*
+!reports/resumes/.gitkeep
+*.log
+tools/cloudflared.exe
 venv/
 node_modules

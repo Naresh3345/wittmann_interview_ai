@@ -13,6 +13,7 @@
       <input type="radio" name="role_id" value="{{ role.role_id }}" required>
       <span>{{ role.role_name }}</span>
       <small>Section 1: Aptitude | Section 2: Programming output tests</small>
+      <small>Allowed degree: {{ role.allowed_degrees or "Any degree" }}</small>
     </label>
     {% endfor %}
     <section class="terms-panel">
@@ -35,6 +36,11 @@
       <strong>System Compatibility</strong>
       <ul id="compatibilityList"></ul>
       <p id="compatibilityMessage"></p>
+      <div class="lan-camera-guide browser-camera-guide" id="browserCameraGuide" hidden>
+        <strong>Open in Mobile Browser</strong>
+        <p>Gmail, WhatsApp, Instagram, and some in-app browsers can block camera and microphone access. Open this interview link in Safari or Chrome, then allow camera and microphone permissions.</p>
+        <button class="btn ghost compact" id="copyBrowserLinkButton" type="button">Copy Secure Link</button>
+      </div>
       <div class="lan-camera-guide" id="lanCameraGuide" hidden>
         <strong>Enable Camera on This LAN System</strong>
         <ol>
@@ -61,12 +67,23 @@
   const message = document.getElementById('compatibilityMessage');
   const startButton = document.getElementById('startRoleButton');
   const termsAccepted = document.getElementById('termsAccepted');
+  const browserCameraGuide = document.getElementById('browserCameraGuide');
+  const copyBrowserLinkButton = document.getElementById('copyBrowserLinkButton');
   const lanCameraGuide = document.getElementById('lanCameraGuide');
   const lanOriginValue = document.getElementById('lanOriginValue');
   const copyLanOriginButton = document.getElementById('copyLanOriginButton');
 
-  const isLanHttp = !window.isSecureContext && location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
-  const lanOrigin = location.origin;
+  const secureOrigin = `https://${location.host}`;
+  const secureCurrentUrl = `${secureOrigin}${location.pathname}${location.search}${location.hash}`;
+  const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
+  const isTryCloudflare = location.hostname.endsWith('.trycloudflare.com');
+  const isLanHttp = !window.isSecureContext && location.protocol === 'http:' && !isLocalHost && !isTryCloudflare;
+  const isInsecurePublicTunnel = isTryCloudflare && location.protocol === 'http:';
+  const lanOrigin = isInsecurePublicTunnel ? secureOrigin : location.origin;
+
+  if (isInsecurePublicTunnel) {
+    window.location.replace(secureCurrentUrl);
+  }
 
   if (lanOriginValue) {
     lanOriginValue.textContent = lanOrigin;
@@ -81,6 +98,18 @@
     }
     setTimeout(() => {
       copyLanOriginButton.textContent = 'Copy Site Address';
+    }, 1800);
+  });
+
+  copyBrowserLinkButton?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(window.isSecureContext ? location.href : secureCurrentUrl);
+      copyBrowserLinkButton.textContent = 'Copied';
+    } catch (error) {
+      copyBrowserLinkButton.textContent = 'Copy Failed';
+    }
+    setTimeout(() => {
+      copyBrowserLinkButton.textContent = 'Copy Secure Link';
     }, 1800);
   });
 
@@ -102,6 +131,7 @@
   async function runCompatibilityCheck() {
     panel.hidden = false;
     lanCameraGuide.hidden = true;
+    browserCameraGuide.hidden = true;
     list.innerHTML = '';
     message.textContent = 'Testing camera, microphone, and browser readiness...';
     startButton.disabled = true;
@@ -111,7 +141,7 @@
       addCheck('JavaScript is enabled', true),
       addCheck('Page visibility monitoring is available', typeof document.hidden !== 'undefined'),
       addCheck('Modern browser storage is available', Boolean(window.localStorage)),
-      addCheck('Screen size is suitable for interview', window.innerWidth >= 900 && window.innerHeight >= 600),
+      addCheck('Mobile or desktop interview layout is available', true),
     ];
     const mediaChecks = [
       addCheck('Camera and microphone API is available', Boolean(navigator.mediaDevices?.getUserMedia)),
@@ -135,9 +165,14 @@
           stream.getTracks().forEach((track) => track.stop());
         }
       }
-    } else if (isLanHttp) {
-      addWarning('Camera and microphone are blocked on LAN HTTP. Apply the Chrome secure-origin setting shown below before starting.');
-      lanCameraGuide.hidden = false;
+    } else {
+      if (isLanHttp) {
+        addWarning('Camera and microphone are blocked on LAN HTTP. Apply the Chrome secure-origin setting shown below before starting.');
+        lanCameraGuide.hidden = false;
+      } else {
+        addWarning('This browser does not allow camera and microphone access. Open the secure interview link in Safari or Chrome, not inside Gmail or another app browser.');
+        browserCameraGuide.hidden = false;
+      }
     }
 
     const requiredPassed = requiredChecks.every(Boolean);
@@ -145,6 +180,8 @@
     const canStart = requiredPassed && mediaPassed;
     if (requiredPassed && !mediaPassed && isLanHttp) {
       lanCameraGuide.hidden = false;
+    } else if (requiredPassed && !mediaPassed) {
+      browserCameraGuide.hidden = false;
     }
     message.textContent = requiredPassed
       ? (mediaPassed ? 'All requirements are satisfied. Starting interview...' : 'Camera and microphone access are required before starting the interview.')
