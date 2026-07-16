@@ -55,7 +55,7 @@ const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
 const isTryCloudflare = location.hostname.endsWith('.trycloudflare.com');
 const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth <= 720;
 const frameCheckMs = isMobileDevice ? 4000 : 2500;
-const missingFaceLimit = isMobileDevice ? 5 : 3;
+const missingFaceLimit = isMobileDevice ? 2 : 3;
 const multipleFaceLimit = isMobileDevice ? 2 : 1;
 const isLanHttp = !window.isSecureContext && location.protocol === 'http:' && !isLocalHost && !isTryCloudflare;
 const isInsecurePublicTunnel = isTryCloudflare && location.protocol === 'http:';
@@ -323,10 +323,13 @@ async function sendFrame() {
       emotionStatus.innerText = `Emotion: ${data.emotion} - ${data.confidence_hint}`;
     } else {
       missingFaceFrames += 1;
-      faceStatus.innerText = 'Face not centered';
+      faceStatus.innerText = 'Face out of camera';
       emotionStatus.innerText = data.confidence_hint || 'Adjust camera position';
       if (missingFaceFrames >= missingFaceLimit) {
-        triggerAlarm('Suspicious camera activity: candidate face is continuously missing or fully turned away.');
+        const missingFaceMessage = isMobileDevice
+          ? 'Face is fully out of camera. Please keep your face visible on the mobile screen.'
+          : 'Suspicious camera activity: candidate face is continuously missing or fully turned away.';
+        triggerAlarm(missingFaceMessage);
         missingFaceFrames = 0;
       }
     }

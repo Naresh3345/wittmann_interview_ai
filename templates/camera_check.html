@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="camera-check-layout">
+  <section class="camera-check-copy">
+    <p class="eyebrow">Camera Check</p>
+    <h1>Center Your Face</h1>
+    <p class="subtitle">{{ candidate.name }} must place their face inside the center mark before starting the {{ role_name }} interview.</p>
+    <div class="candidate-summary camera-check-summary">
+      <strong>{{ candidate.name }}</strong>
+      <span>{{ candidate.email }}</span>
+      <small>{{ role_name }}</small>
+    </div>
+  </section>
+
+  <section class="camera-check-panel">
+    <div class="face-preview-wrap camera-check-preview">
+      <video id="cameraCheckVideo" autoplay muted playsinline></video>
+      <div class="face-center-guide not-centered" id="faceCenterGuide" aria-hidden="true"></div>
+    </div>
+    <canvas id="cameraCheckSnapshot" width="360" height="270" hidden></canvas>
+
+    <div class="face-center-status" id="faceCenterStatus">Allow camera access and place your face inside the center mark.</div>
+    <ul class="camera-check-list" id="cameraCheckList"></ul>
+
+    <div class="lan-camera-guide browser-camera-guide" id="browserCameraGuide" hidden>
+      <strong>Open in Mobile Browser</strong>
+      <p>Gmail, WhatsApp, Instagram, and some in-app browsers can block camera and microphone access. Open this interview link in Safari or Chrome, then allow camera and microphone permissions.</p>
+      <button class="btn ghost compact" id="copyBrowserLinkButton" type="button">Copy Secure Link</button>
+    </div>
+    <div class="lan-camera-guide" id="lanCameraGuide" hidden>
+      <strong>Enable Camera on This LAN System</strong>
+      <ol>
+        <li>Open <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>.</li>
+        <li>Paste this address: <code id="lanOriginValue"></code></li>
+        <li>Set the flag to <strong>Enabled</strong>, then click <strong>Relaunch</strong>.</li>
+        <li>Open this page again and allow camera and microphone access.</li>
+      </ol>
+      <button class="btn ghost compact" id="copyLanOriginButton" type="button">Copy Site Address</button>
+    </div>
+
+    <form method="post" id="cameraCheckForm">
+      <button class="btn primary full" id="startAptitudeButton" type="submit" disabled>Start Aptitude Test</button>
+    </form>
+    <button class="btn ghost full" id="retryCameraCheckButton" type="button">Test Camera Again</button>
+  </section>
+</main>
+
+<div class="success-popup" id="cameraSuccessPopup" hidden>
+  <div class="success-tick" aria-hidden="true"></div>
+  <strong>Face Centered</strong>
+  <p>You can start the aptitude test now.</p>
+</div>
+
+<script>
+  const video = document.getElementById('cameraCheckVideo');
+  const snapshot = document.getElementById('cameraCheckSnapshot');
+  const guide = document.getElementById('faceCenterGuide');
+  const statusText = document.getElementById('faceCenterStatus');
+  const checkList = document.getElementById('cameraCheckList');
+  const startButton = document.getElementById('startAptitudeButton');
+  const retryButton = document.getElementById('retryCameraCheckButton');
+  const successPopup = document.getElementById('cameraSuccessPopup');
+  const browserCameraGuide = document.getElementById('browserCameraGuide');
+  const copyBrowserLinkButton = document.getElementById('copyBrowserLinkButton');
+  const lanCameraGuide = document.getElementById('lanCameraGuide');
+  const lanOriginValue = document.getElementById('lanOriginValue');
+  const copyLanOriginButton = document.getElementById('copyLanOriginButton');
+  let activeStream = null;
+  let checkToken = 0;
+
+  const secureOrigin = `https://${location.host}`;
+  const secureCurrentUrl = `${secureOrigin}${location.pathname}${location.search}${location.hash}`;
+  const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
+  const isTryCloudflare = location.hostname.endsWith('.trycloudflare.com');
+  const isLanHttp = !window.isSecureContext && location.protocol === 'http:' && !isLocalHost && !isTryCloudflare;
+  const isInsecurePublicTunnel = isTryCloudflare && location.protocol === 'http:';
+  const lanOrigin = isInsecurePublicTunnel ? secureOrigin : location.origin;
+
+  if (isInsecurePublicTunnel) {
+    window.location.replace(secureCurrentUrl);
+  }
+  if (lanOriginValue) {
+    lanOriginValue.textContent = lanOrigin;
+  }
+
+  copyLanOriginButton?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(lanOrigin);
+      copyLanOriginButton.textContent = 'Copied';
+    } catch (error) {
+      copyLanOriginButton.textContent = 'Copy Failed';
+    }
+    setTimeout(() => { copyLanOriginButton.textContent = 'Copy Site Address'; }, 1800);
+  });
+
+  copyBrowserLinkButton?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(window.isSecureContext ? location.href : secureCurrentUrl);
+      copyBrowserLinkButton.textContent = 'Copied';
+    } catch (error) {
+      copyBrowserLinkButton.textContent = 'Copy Failed';
+    }
+    setTimeout(() => { copyBrowserLinkButton.textContent = 'Copy Secure Link'; }, 1800);
+  });
+
+  function addCheck(label, passed) {
+    const item = document.createElement('li');
+    item.className = passed ? 'check-pass' : 'check-fail';
+    item.textContent = `${passed ? 'Pass' : 'Fail'} - ${label}`;
+    checkList.appendChild(item);
+    return passed;
+  }
+
+  function setCentered(centered, text) {
+    guide.classList.toggle('centered', centered);
+    guide.classList.toggle('not-centered', !centered);
+    statusText.textContent = text;
+  }
+
+  function stopStream() {
+    if (activeStream) {
+      activeStream.getTracks().forEach((track) => track.stop());
+      activeStream = null;
+    }
+  }
+
+  function waitForVideoReady() {
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      video.addEventListener('loadedmetadata', resolve, { once: true });
+    });
+  }
+
+  async function analyzeFrame() {
+    const ctx = snapshot.getContext('2d');
+    ctx.drawImage(video, 0, 0, snapshot.width, snapshot.height);
+    const image = snapshot.toDataURL('image/jpeg', 0.7);
+    const response = await fetch('/api/analyze-frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image }),
+    });
+    return response.json();
+  }
+
+  async function runCameraCheck() {
+    const token = ++checkToken;
+    stopStream();
+    checkList.innerHTML = '';
+    successPopup.hidden = true;
+    startButton.disabled = true;
+    startButton.textContent = 'Start Aptitude Test';
+    browserCameraGuide.hidden = true;
+    lanCameraGuide.hidden = true;
+    setCentered(false, 'Testing camera, microphone, and face position...');
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      addCheck('Camera and microphone API is available', false);
+      setCentered(false, 'Open this link in Safari or Chrome and allow camera access.');
+      if (isLanHttp) {
+        lanCameraGuide.hidden = false;
+      } else {
+        browserCameraGuide.hidden = false;
+      }
+      return;
+    }
+
+    try {
+      activeStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
+        audio: true,
+      });
+      addCheck('Camera permission granted and working', activeStream.getVideoTracks().length > 0);
+      addCheck('Microphone permission granted and working', activeStream.getAudioTracks().length > 0);
+      video.srcObject = activeStream;
+      await video.play().catch(() => {});
+      await waitForVideoReady();
+    } catch (error) {
+      addCheck('Camera permission granted and working', false);
+      addCheck('Microphone permission granted and working', false);
+      setCentered(false, 'Camera or microphone permission was blocked. Allow permission and test again.');
+      if (isLanHttp) {
+        lanCameraGuide.hidden = false;
+      } else {
+        browserCameraGuide.hidden = false;
+      }
+      return;
+    }
+
+    let centeredFrames = 0;
+    for (let attempt = 0; attempt < 40 && token === checkToken; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      let data;
+      try {
+        data = await analyzeFrame();
+      } catch (error) {
+        data = { face_detected: false, face_centered: false };
+      }
+
+      if (data.face_centered) {
+        centeredFrames += 1;
+        setCentered(true, 'Face centered. Hold still for a moment.');
+      } else {
+        centeredFrames = 0;
+        if (data.multiple_faces) {
+          setCentered(false, 'Only one candidate face should be visible.');
+        } else if (data.face_detected) {
+          setCentered(false, data.confidence_hint || 'Move your face inside the center mark.');
+        } else {
+          setCentered(false, 'No face detected. Place your face inside the center mark.');
+        }
+      }
+
+      if (centeredFrames >= 3) {
+        addCheck('Face is centered in camera frame', true);
+        setCentered(true, 'Face centered. You can start the aptitude test.');
+        successPopup.hidden = false;
+        startButton.disabled = false;
+        startButton.focus();
+        setTimeout(() => { successPopup.hidden = true; }, 3500);
+        return;
+      }
+    }
+
+    if (token === checkToken) {
+      addCheck('Face is centered in camera frame', false);
+      setCentered(false, 'Face is not centered. Adjust your position and test again.');
+    }
+  }
+
+  retryButton.addEventListener('click', runCameraCheck);
+  document.getElementById('cameraCheckForm').addEventListener('submit', () => {
+    stopStream();
+  });
+  window.addEventListener('beforeunload', stopStream);
+  runCameraCheck();
+</script>
+{% endblock %}

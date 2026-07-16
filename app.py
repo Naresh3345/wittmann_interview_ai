@@ -676,12 +676,32 @@ def select_role():
                 role_name = selected.get("role_name") if isinstance(selected, dict) else getattr(selected, "role_name", None)
                 session["role_name"] = role_name
                 session["terms_accepted"] = True
-                return redirect(url_for("interview"))
+                session.pop("camera_check_passed", None)
+                return redirect(url_for("camera_check"))
     return render_template(
         "roles.html",
         roles=roles,
         candidate=session.get("candidate", {}),
         error=error,
+        company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
+    )
+
+
+@app.route("/camera-check", methods=["GET", "POST"])
+def camera_check():
+    if "user_id" not in session:
+        return redirect(url_for("index"))
+    if "role_id" not in session:
+        return redirect(url_for("select_role"))
+    if not session.get("terms_accepted"):
+        return redirect(url_for("select_role"))
+    if request.method == "POST":
+        session["camera_check_passed"] = True
+        return redirect(url_for("interview"))
+    return render_template(
+        "camera_check.html",
+        candidate=session.get("candidate", {}),
+        role_name=session.get("role_name", "Selected Role"),
         company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
@@ -694,6 +714,8 @@ def interview():
         return redirect(url_for("select_role"))
     if not session.get("terms_accepted"):
         return redirect(url_for("select_role"))
+    if not session.get("camera_check_passed"):
+        return redirect(url_for("camera_check"))
 
     interview_id = str(uuid.uuid4())
     session["interview_id"] = interview_id
