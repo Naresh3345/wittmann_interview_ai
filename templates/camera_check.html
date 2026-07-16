@@ -24,7 +24,7 @@
 
     <div class="lan-camera-guide browser-camera-guide" id="browserCameraGuide" hidden>
       <strong>Open in Mobile Browser</strong>
-      <p>Gmail, WhatsApp, Instagram, and some in-app browsers can block camera and microphone access. Open this interview link in Safari or Chrome, then allow camera and microphone permissions.</p>
+      <p>Gmail, WhatsApp, Instagram, and some in-app browsers can block camera access. Open this interview link in Safari or Chrome, then allow camera permission.</p>
       <button class="btn ghost compact" id="copyBrowserLinkButton" type="button">Copy Secure Link</button>
     </div>
     <div class="lan-camera-guide" id="lanCameraGuide" hidden>
@@ -33,7 +33,7 @@
         <li>Open <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>.</li>
         <li>Paste this address: <code id="lanOriginValue"></code></li>
         <li>Set the flag to <strong>Enabled</strong>, then click <strong>Relaunch</strong>.</li>
-        <li>Open this page again and allow camera and microphone access.</li>
+        <li>Open this page again and allow camera access.</li>
       </ol>
       <button class="btn ghost compact" id="copyLanOriginButton" type="button">Copy Site Address</button>
     </div>
@@ -154,10 +154,10 @@
     startButton.textContent = 'Start Aptitude Test';
     browserCameraGuide.hidden = true;
     lanCameraGuide.hidden = true;
-    setCentered(false, 'Testing camera, microphone, and face position...');
+    setCentered(false, 'Testing camera and face position...');
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      addCheck('Camera and microphone API is available', false);
+      addCheck('Camera API is available', false);
       setCentered(false, 'Open this link in Safari or Chrome and allow camera access.');
       if (isLanHttp) {
         lanCameraGuide.hidden = false;
@@ -174,17 +174,15 @@
           width: { ideal: 640 },
           height: { ideal: 480 },
         },
-        audio: true,
+        audio: false,
       });
       addCheck('Camera permission granted and working', activeStream.getVideoTracks().length > 0);
-      addCheck('Microphone permission granted and working', activeStream.getAudioTracks().length > 0);
       video.srcObject = activeStream;
       await video.play().catch(() => {});
       await waitForVideoReady();
     } catch (error) {
       addCheck('Camera permission granted and working', false);
-      addCheck('Microphone permission granted and working', false);
-      setCentered(false, 'Camera or microphone permission was blocked. Allow permission and test again.');
+      setCentered(false, 'Camera permission was blocked. Allow camera permission and test again.');
       if (isLanHttp) {
         lanCameraGuide.hidden = false;
       } else {
