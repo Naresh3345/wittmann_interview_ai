@@ -50,7 +50,7 @@
 
 <div class="success-popup" id="cameraSuccessPopup" hidden>
   <div class="success-tick" aria-hidden="true"></div>
-  <strong>Face Centered</strong>
+  <strong>Tested OK</strong>
   <p>You can start the aptitude test now.</p>
 </div>
 
@@ -212,7 +212,7 @@
 
       if (data.face_centered) {
         centeredFrames += 1;
-        setCentered(true, 'Face centered. Hold still for a moment.');
+        setCentered(true, 'Tested OK. Face is visible.');
       } else {
         centeredFrames = 0;
         if (data.multiple_faces) {
@@ -224,10 +224,10 @@
         }
       }
 
-      if (centeredFrames >= 3) {
-        addCheck('Face is centered in camera frame', true);
+      if (centeredFrames >= 1) {
+        addCheck('Camera face test completed OK', true);
         profilePhotoInput.value = captureFrameDataUrl();
-        setCentered(true, 'Face centered. You can start the aptitude test.');
+        setCentered(true, 'Tested OK. You can start the aptitude test.');
         successPopup.hidden = false;
         startButton.disabled = false;
         startButton.focus();

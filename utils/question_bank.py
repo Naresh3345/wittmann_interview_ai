@@ -8,7 +8,9 @@ from psycopg.types.json import Jsonb
 from utils.database import get_db
 
 
-SECTION_COUNTS = {"Aptitude": 30, "Programming": 5}
+SECTION_COUNTS = {"Aptitude": 20, "Programming": 10}
+SQL_PROGRAMMING_MIN = 3
+SQL_PROGRAMMING_MAX = 4
 
 
 def ensure_question_bank_indexes():
@@ -88,6 +90,8 @@ def parse_question_sets(value):
         label = part.strip()
         if not label:
             continue
+        if label.lower() in {"all", "all set", "all sets", "*"}:
+            return []
         if label.isdigit():
             label = f"Set {label}"
         elif label.lower().startswith("set"):
@@ -111,7 +115,55 @@ def active_sets_for_role(conn, role_slug):
     return [row["question_set"] for row in rows if row["question_set"]]
 
 
-def select_questions_for_role(role_slug, excluded_ids=None, allowed_question_sets=""):
+def is_sql_question(item):
+    text = " ".join(
+        str(item.get(key) or "")
+        for key in ("topic", "question_text", "correct_answer")
+    ).lower()
+    return "sql" in text or "database" in text
+
+
+def choose_least_assigned(pool, count):
+    pool = list(pool)
+    pool.sort(key=assignment_sort_key)
+    chosen = pool[:count]
+    random.shuffle(chosen)
+    return chosen
+
+
+def select_programming_questions(pool, count):
+    sql_pool = [item for item in pool if is_sql_question(item)]
+    non_sql_pool = [item for item in pool if item not in sql_pool]
+    target_sql = min(SQL_PROGRAMMING_MAX, max(SQL_PROGRAMMING_MIN, min(len(sql_pool), SQL_PROGRAMMING_MAX)))
+    target_sql = min(target_sql, count)
+    if len(sql_pool) < SQL_PROGRAMMING_MIN:
+        target_sql = len(sql_pool)
+    chosen = choose_least_assigned(sql_pool, target_sql)
+    remaining_count = count - len(chosen)
+    chosen_ids = {item["question_id"] for item in chosen}
+    remaining_pool = [item for item in non_sql_pool if item["question_id"] not in chosen_ids]
+    if len(remaining_pool) < remaining_count:
+        remaining_pool.extend(
+            item for item in sql_pool
+            if item["question_id"] not in chosen_ids
+        )
+    chosen.extend(choose_least_assigned(remaining_pool, remaining_count))
+    random.shuffle(chosen)
+    return chosen
+
+
+def apply_paper_marks(questions, total_paper_marks=0):
+    try:
+        total_marks = float(total_paper_marks or 0)
+    except (TypeError, ValueError):
+        total_marks = 0
+    per_question = round(total_marks / len(questions), 4) if total_marks > 0 and questions else 1
+    for question in questions:
+        question["marks"] = per_question
+    return questions
+
+
+def select_questions_for_role(role_slug, excluded_ids=None, allowed_question_sets="", total_paper_marks=0):
     excluded_ids = {int(value) for value in (excluded_ids or set()) if str(value).isdigit()}
     selected = []
     now = datetime.now()
@@ -141,15 +193,21 @@ def select_questions_for_role(role_slug, excluded_ids=None, allowed_question_set
                 """,
                 tuple(params),
             ).fetchall()
+            if not pool:
+                source_label = f" in selected sets: {', '.join(question_sets)}" if question_sets else ""
+                raise ValueError(
+                    f"PostgreSQL question bank has no active {section} questions for role '{role_slug}'{source_label}."
+                )
             if len(pool) < count:
                 source_label = f" in selected sets: {', '.join(question_sets)}" if question_sets else ""
                 raise ValueError(
                     f"PostgreSQL question bank has only {len(pool)} active {section} questions for role '{role_slug}'{source_label}. "
                     f"At least {count} are required."
                 )
-            pool.sort(key=assignment_sort_key)
-            chosen = pool[:count]
-            random.shuffle(chosen)
+            if section == "Programming":
+                chosen = select_programming_questions(pool, count)
+            else:
+                chosen = choose_least_assigned(pool, count)
             selected.extend(chosen)
             conn.execute(
                 """
@@ -162,7 +220,7 @@ def select_questions_for_role(role_slug, excluded_ids=None, allowed_question_set
                 (now, now, [item["question_id"] for item in chosen]),
             )
 
-    return [normalize_question(item) for item in selected]
+    return apply_paper_marks([normalize_question(item) for item in selected], total_paper_marks)
 
 
 def import_questions_from_json(path):

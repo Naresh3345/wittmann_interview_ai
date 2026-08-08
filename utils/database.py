@@ -135,7 +135,7 @@ QUESTION_TOPICS = {
     },
 }
 
-SECTION_COUNTS = {"Aptitude": 30, "Programming": 5}
+SECTION_COUNTS = {"Aptitude": 20, "Programming": 10}
 
 
 @contextmanager
@@ -257,12 +257,21 @@ def init_db():
         ensure_column(conn, "roles", "allowed_question_sets", "TEXT")
         ensure_column(conn, "roles", "aptitude_minutes", "INTEGER DEFAULT 20")
         ensure_column(conn, "roles", "programming_minutes", "INTEGER DEFAULT 20")
+        ensure_column(conn, "roles", "total_paper_marks", "REAL DEFAULT 0")
+        ensure_column(conn, "roles", "shortlist_min_marks", "REAL DEFAULT 0")
         ensure_column(conn, "roles", "deleted_at", "TIMESTAMPTZ")
         ensure_column(conn, "roles", "deleted_by", "TEXT")
         ensure_column(conn, "interviews", "report_path", "TEXT")
         ensure_column(conn, "interviews", "shortlist_status", "TEXT")
         ensure_column(conn, "interviews", "shortlist_reason", "TEXT")
         ensure_column(conn, "interviews", "reviewer_note", "TEXT")
+        ensure_column(conn, "interviews", "interview_started_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "interview_completed_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "last_activity_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "current_section", "TEXT")
+        ensure_column(conn, "interviews", "current_question_number", "INTEGER")
+        ensure_column(conn, "interviews", "current_question_text", "TEXT")
+        ensure_proctoring_settings_table(conn)
         for slug, name in ROLES:
             conn.execute(
                 """
@@ -276,6 +285,8 @@ def init_db():
 
 
 def ensure_column(conn, table_name, column_name, column_definition):
+    if not table_name.replace("_", "").isalnum() or not column_name.replace("_", "").isalnum():
+        raise ValueError("Unsafe table or column name")
     row = conn.execute(
         """
         SELECT 1
@@ -285,7 +296,55 @@ def ensure_column(conn, table_name, column_name, column_definition):
         (table_name, column_name),
     ).fetchone()
     if not row:
-        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
+        conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_definition}')
+
+
+def ensure_proctoring_settings_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS proctoring_settings (
+            settings_id INTEGER PRIMARY KEY DEFAULT 1,
+            protected_test_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            tab_switch_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            focus_warning_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            camera_warning_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            multiple_face_warning_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            tab_switch_limit INTEGER NOT NULL DEFAULT 5,
+            warning_limit INTEGER NOT NULL DEFAULT 10,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    ensure_column(conn, "proctoring_settings", "protected_test_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
+    ensure_column(conn, "proctoring_settings", "tab_switch_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
+    ensure_column(conn, "proctoring_settings", "focus_warning_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
+    ensure_column(conn, "proctoring_settings", "camera_warning_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
+    ensure_column(conn, "proctoring_settings", "multiple_face_warning_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
+    ensure_column(conn, "proctoring_settings", "tab_switch_limit", "INTEGER NOT NULL DEFAULT 5")
+    ensure_column(conn, "proctoring_settings", "warning_limit", "INTEGER NOT NULL DEFAULT 10")
+    ensure_column(conn, "proctoring_settings", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT now()")
+    conn.execute(
+        """
+        INSERT INTO proctoring_settings (settings_id)
+        VALUES (1)
+        ON CONFLICT (settings_id) DO NOTHING
+        """
+    )
+
+
+def get_proctoring_settings():
+    with get_db() as conn:
+        ensure_proctoring_settings_table(conn)
+        row = conn.execute("SELECT * FROM proctoring_settings WHERE settings_id = 1").fetchone()
+    return dict(row) if row else {
+        "protected_test_enabled": True,
+        "tab_switch_enabled": True,
+        "focus_warning_enabled": True,
+        "camera_warning_enabled": True,
+        "multiple_face_warning_enabled": True,
+        "tab_switch_limit": 5,
+        "warning_limit": 10,
+    }
 
 
 def seed_question_patterns(conn):
@@ -329,12 +388,16 @@ def list_roles():
         ensure_column(conn, "roles", "allowed_question_sets", "TEXT")
         ensure_column(conn, "roles", "aptitude_minutes", "INTEGER DEFAULT 20")
         ensure_column(conn, "roles", "programming_minutes", "INTEGER DEFAULT 20")
+        ensure_column(conn, "roles", "total_paper_marks", "REAL DEFAULT 0")
+        ensure_column(conn, "roles", "shortlist_min_marks", "REAL DEFAULT 0")
         ensure_column(conn, "roles", "deleted_at", "TIMESTAMPTZ")
         return conn.execute(
             """
             SELECT role_id, role_slug, role_name, allowed_degrees, allowed_question_sets,
                    COALESCE(aptitude_minutes, 20) AS aptitude_minutes,
-                   COALESCE(programming_minutes, 20) AS programming_minutes
+                   COALESCE(programming_minutes, 20) AS programming_minutes,
+                   COALESCE(total_paper_marks, 0) AS total_paper_marks,
+                   COALESCE(shortlist_min_marks, 0) AS shortlist_min_marks
             FROM roles
             WHERE deleted_at IS NULL
             ORDER BY role_id
@@ -392,20 +455,53 @@ def mark_test_link_used(token):
 
 
 def create_interview(interview_id, user_id, role_id):
+    now = datetime.now()
     with get_db() as conn:
+        ensure_column(conn, "interviews", "interview_started_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "interview_completed_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "last_activity_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "current_section", "TEXT")
+        ensure_column(conn, "interviews", "current_question_number", "INTEGER")
+        ensure_column(conn, "interviews", "current_question_text", "TEXT")
         conn.execute(
             """
             INSERT INTO interviews
-                (interview_id, user_id, role_id, date, total_score, status)
-            VALUES (%s, %s, %s, %s, %s, %s)
+                (interview_id, user_id, role_id, date, total_score, status, interview_started_at, last_activity_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (interview_id) DO UPDATE SET
                 user_id = EXCLUDED.user_id,
                 role_id = EXCLUDED.role_id,
                 date = EXCLUDED.date,
                 total_score = EXCLUDED.total_score,
-                status = EXCLUDED.status
+                status = EXCLUDED.status,
+                interview_started_at = EXCLUDED.interview_started_at,
+                interview_completed_at = NULL,
+                last_activity_at = EXCLUDED.last_activity_at,
+                current_section = NULL,
+                current_question_number = NULL,
+                current_question_text = NULL
             """,
-            (interview_id, user_id, role_id, datetime.now(), 0, "Started"),
+            (interview_id, user_id, role_id, now, 0, "In Progress", now, now),
+        )
+
+
+def update_interview_progress(interview_id, section="", question_number=None, question_text=""):
+    with get_db() as conn:
+        ensure_column(conn, "interviews", "last_activity_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "current_section", "TEXT")
+        ensure_column(conn, "interviews", "current_question_number", "INTEGER")
+        ensure_column(conn, "interviews", "current_question_text", "TEXT")
+        conn.execute(
+            """
+            UPDATE interviews
+            SET status = CASE WHEN status = 'Completed' THEN status ELSE 'In Progress' END,
+                current_section = %s,
+                current_question_number = %s,
+                current_question_text = %s,
+                last_activity_at = %s
+            WHERE interview_id = %s
+            """,
+            (section or None, question_number, question_text or None, datetime.now(), interview_id),
         )
 
 
@@ -438,14 +534,29 @@ def load_interview_questions(interview_id):
 
 
 def complete_interview(interview_id, total_score, report_path, shortlist_status, shortlist_reason):
+    now = datetime.now()
     with get_db() as conn:
+        ensure_column(conn, "interviews", "interview_completed_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "last_activity_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "current_section", "TEXT")
+        ensure_column(conn, "interviews", "current_question_number", "INTEGER")
+        ensure_column(conn, "interviews", "current_question_text", "TEXT")
         conn.execute(
             """
             UPDATE interviews
-            SET total_score = %s, status = %s, report_path = %s, shortlist_status = %s, shortlist_reason = %s
+            SET total_score = %s,
+                status = %s,
+                report_path = %s,
+                shortlist_status = %s,
+                shortlist_reason = %s,
+                interview_completed_at = %s,
+                last_activity_at = %s,
+                current_section = NULL,
+                current_question_number = NULL,
+                current_question_text = NULL
             WHERE interview_id = %s
             """,
-            (total_score, "Completed", report_path, shortlist_status, shortlist_reason, interview_id),
+            (total_score, "Completed", report_path, shortlist_status, shortlist_reason, now, now, interview_id),
         )
 
 
@@ -504,10 +615,11 @@ def ensure_questions_for_role(role_id):
             return []
         patterns = conn.execute("SELECT * FROM question_patterns WHERE role_id = %s ORDER BY pattern_id", (role_id,)).fetchall()
         for pattern in patterns:
-            existing_count = conn.execute(
+            result = conn.execute(
                 "SELECT COUNT(*) AS total FROM questions WHERE pattern_id = %s",
                 (pattern["pattern_id"],),
-            ).fetchone()["total"]
+            ).fetchone()
+            existing_count = result["total"] if result else 0
             if existing_count >= pattern["no_of_questions"]:
                 continue
             topics = QUESTION_TOPICS[role["role_slug"]][pattern["question_type"]]

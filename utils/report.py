@@ -29,11 +29,48 @@ UNICODE_FONT = _register_unicode_font()
 
 
 def _paragraph(value, style):
-    return Paragraph(escape(str(value or "")), style)
+    return Paragraph(escape(str(value or "")).replace("\n", "<br/>"), style)
+
+
+def _escaped_lines(value):
+    return escape(str(value or "")).replace("\n", "<br/>")
 
 
 def _score_value(result):
     return float(result.get("score", {}).get("total_score") or 0)
+
+
+def _question_marks(result):
+    try:
+        return float(result.get("question", {}).get("marks") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _earned_marks(result):
+    marks = _question_marks(result)
+    if marks <= 0:
+        marks = 1.0
+    return round((marks * _score_value(result)) / 100, 2)
+
+
+def _format_number(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "0"
+    return str(int(number)) if number.is_integer() else f"{number:.2f}".rstrip("0").rstrip(".")
+
+
+def _section_results(results, section):
+    return [result for result in results if result.get("question", {}).get("category") == section]
+
+
+def _section_totals(results):
+    total_marks = sum((_question_marks(result) or 1.0) for result in results)
+    earned_marks = sum(_earned_marks(result) for result in results)
+    percent = (earned_marks / total_marks) * 100 if total_marks else 0
+    return round(earned_marks, 2), round(total_marks, 2), round(percent, 2)
 
 
 def _answer_status(result):
@@ -102,11 +139,14 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
     story.append(Paragraph("Candidate Interview Assessment Report", heading_style))
     candidate_details = [[Paragraph(f"Candidate: {escape(candidate_name)}", normal_style)]]
     if face_summary.get("candidate_email"):
-        candidate_details.append([Paragraph(f"Email: {escape(face_summary.get('candidate_email'))}", normal_style)])
+        email_val = face_summary.get("candidate_email") or ""
+        candidate_details.append([Paragraph(f"Email: {escape(email_val)}", normal_style)])
     if face_summary.get("candidate_phone"):
-        candidate_details.append([Paragraph(f"Phone: {escape(face_summary.get('candidate_phone'))}", normal_style)])
+        phone_val = face_summary.get("candidate_phone") or ""
+        candidate_details.append([Paragraph(f"Phone: {escape(phone_val)}", normal_style)])
     if face_summary.get("resume_path"):
-        candidate_details.append([Paragraph(f"Resume Saved: {escape(face_summary.get('resume_path'))}", normal_style)])
+        resume_val = face_summary.get("resume_path") or ""
+        candidate_details.append([Paragraph(f"Resume Saved: {escape(resume_val)}", normal_style)])
     candidate_details.append([Paragraph(f"Generated: {datetime.now().strftime('%d-%m-%Y %I:%M %p')}", normal_style)])
     profile_photo_value = face_summary.get("profile_photo_path") or ""
     profile_photo_path = Path(profile_photo_value) if profile_photo_value else None
@@ -130,16 +170,62 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
             story.append(row[0])
     story.append(Spacer(1, 14))
 
-    avg = sum(r["score"]["total_score"] for r in results) / max(len(results), 1)
-    story.append(Paragraph(f"Overall Score: {avg:.2f}%", heading_style))
+    earned_marks, total_marks, overall_percent = _section_totals(results)
+    story.append(Paragraph(
+        f"Overall Score: {overall_percent:.2f}% | Marks: {_format_number(earned_marks)} / {_format_number(total_marks)}",
+        heading_style,
+    ))
     story.append(Paragraph(f"Face Confidence Index: {face_summary.get('confidence_index', 0)}%", normal_style))
     story.append(Paragraph(f"Detected Frames: {face_summary.get('detected_frames', 0)} / {face_summary.get('total_frames', 0)}", normal_style))
     violations = face_summary.get("proctoring_violations", [])
     story.append(Paragraph(f"Proctoring Alerts: {len(violations)}", normal_style))
-    if face_summary.get("auto_submit_reason"):
-        story.append(Paragraph(f"Auto Submit Reason: {escape(face_summary.get('auto_submit_reason'))}", normal_style))
-    story.append(Paragraph(f"Shortlist Result: {escape(face_summary.get('shortlist_status', 'Pending'))}", heading_style))
-    story.append(Paragraph(f"Reason: {escape(face_summary.get('shortlist_reason', ''))}", normal_style))
+    auto_submit_reason = face_summary.get("auto_submit_reason")
+    if auto_submit_reason:
+        story.append(Paragraph(f"Auto Submit Reason: {escape(str(auto_submit_reason))}", normal_style))
+    story.append(Paragraph(
+        f"Shortlist Result: {escape(str(face_summary.get('shortlist_status') or 'Pending'))}",
+        heading_style,
+    ))
+    story.append(Paragraph(
+        f"Reason: {escape(str(face_summary.get('shortlist_reason') or ''))}",
+        normal_style,
+    ))
+    story.append(Spacer(1, 12))
+
+    section_rows = [
+        [
+            _paragraph("Section", table_header_style),
+            _paragraph("Questions", table_header_style),
+            _paragraph("Earned Marks", table_header_style),
+            _paragraph("Total Marks", table_header_style),
+            _paragraph("Percent", table_header_style),
+        ]
+    ]
+    for section in ("Aptitude", "Programming"):
+        items = _section_results(results, section)
+        section_earned, section_marks, section_percent = _section_totals(items)
+        section_rows.append([
+            _paragraph(section, table_cell_style),
+            _paragraph(str(len(items)), table_cell_style),
+            _paragraph(_format_number(section_earned), table_cell_style),
+            _paragraph(_format_number(section_marks), table_cell_style),
+            _paragraph(f"{section_percent:.2f}%", table_cell_style),
+        ])
+    section_table = LongTable(section_rows, colWidths=[doc.width * 0.28, doc.width * 0.18, doc.width * 0.18, doc.width * 0.18, doc.width * 0.18], repeatRows=1)
+    section_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#d1d5db")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(Paragraph("Section-wise Marks", heading_style))
+    story.append(section_table)
     story.append(Spacer(1, 12))
 
     if violations:
@@ -183,7 +269,9 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
         [
             _paragraph("Q.No", table_header_style),
             _paragraph("Category", table_header_style),
+            _paragraph("Marks", table_header_style),
             _paragraph("Score", table_header_style),
+            _paragraph("Earned", table_header_style),
             _paragraph("Result", table_header_style),
             _paragraph("Feedback", table_header_style),
         ]
@@ -193,12 +281,14 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
         data.append([
             _paragraph(str(idx), table_cell_style),
             _paragraph(result["question"].get("category", "General"), table_cell_style),
+            _paragraph(_format_number(_question_marks(result) or 1), table_cell_style),
             _paragraph(f"{_score_value(result):.1f}%", table_cell_style),
+            _paragraph(_format_number(_earned_marks(result)), table_cell_style),
             Paragraph(f'<font color="{status["color"].hexval()}">{status["symbol"]} {status["label"]}</font>', status_style),
             _paragraph(result.get("feedback", ""), table_cell_style),
         ])
 
-    table = LongTable(data, colWidths=[34, 82, 48, 68, doc.width - 232], repeatRows=1)
+    table = LongTable(data, colWidths=[30, 70, 42, 46, 42, 58, doc.width - 288], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -214,19 +304,34 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
     story.append(table)
     story.append(Spacer(1, 16))
 
-    story.append(Paragraph("Detailed Answers", heading_style))
-    for idx, result in enumerate(results, start=1):
-        status = _answer_status(result)
-        status_line = f'<font color="{status["color"].hexval()}">{status["symbol"]} {status["label"]}</font>'
-        story.append(Paragraph(f"{idx}. {escape(result['question']['question'])}", detail_question_style))
-        story.append(Paragraph(f"Result: {status_line} | Score: {_score_value(result):.1f}%", status_style))
-        story.append(Paragraph(f"Candidate Answer: {escape(result.get('answer') or 'Not answered')}", normal_style))
-        correct_answer = result["question"].get("correct_answer") or result["question"].get("ideal_answer") or ""
-        if correct_answer:
-            story.append(Paragraph(f"Correct Answer: {escape(correct_answer)}", normal_style))
-        matched = ", ".join(result["score"].get("matched_keywords", [])) or "None"
-        story.append(Paragraph(f"Matched Keywords: {escape(matched)}", normal_style))
-        story.append(Spacer(1, 8))
+    for section in ("Aptitude", "Programming"):
+        section_items = _section_results(results, section)
+        if not section_items:
+            continue
+        section_earned, section_marks, section_percent = _section_totals(section_items)
+        story.append(Paragraph(
+            f"{section} Detailed Answers - {_format_number(section_earned)} / {_format_number(section_marks)} marks ({section_percent:.2f}%)",
+            heading_style,
+        ))
+        for idx, result in enumerate(section_items, start=1):
+            status = _answer_status(result)
+            status_line = f'<font color="{status["color"].hexval()}">{status["symbol"]} {status["label"]}</font>'
+            question = result["question"]
+            topic = question.get("topic") or "General"
+            marks = _question_marks(result) or 1
+            story.append(Paragraph(f"{idx}. [{escape(topic)}] {_escaped_lines(question['question'])}", detail_question_style))
+            story.append(Paragraph(
+                f"Result: {status_line} | Score: {_score_value(result):.1f}% | Marks: {_format_number(_earned_marks(result))} / {_format_number(marks)}",
+                status_style,
+            ))
+            story.append(Paragraph(f"Candidate Answer: {_escaped_lines(result.get('answer') or 'Not answered')}", normal_style))
+            correct_answer = question.get("correct_answer") or question.get("ideal_answer") or ""
+            if correct_answer:
+                story.append(Paragraph(f"Correct Answer: {_escaped_lines(correct_answer)}", normal_style))
+            story.append(Paragraph(f"Feedback: {_escaped_lines(result.get('feedback', ''))}", normal_style))
+            matched = ", ".join(result["score"].get("matched_keywords", [])) or "None"
+            story.append(Paragraph(f"Matched Keywords: {escape(matched)}", normal_style))
+            story.append(Spacer(1, 8))
 
     doc.build(story)
     return path

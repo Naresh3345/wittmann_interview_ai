@@ -28,6 +28,17 @@ const startProgrammingButton = document.getElementById('startProgrammingButton')
 const progressSection = document.getElementById('progressSection');
 const answeredCountDisplay = document.getElementById('answeredCount');
 const sectionQuestionCount = document.getElementById('sectionQuestionCount');
+const questionMapPanel = document.getElementById('questionMapPanel');
+const questionMapRound = document.getElementById('questionMapRound');
+const questionMapSummary = document.getElementById('questionMapSummary');
+const questionDotGrid = document.getElementById('questionDotGrid');
+const questionFloatNav = document.getElementById('questionFloatNav');
+const questionBackButton = document.getElementById('questionBackButton');
+const questionNextButton = document.getElementById('questionNextButton');
+const questionStepLabel = document.getElementById('questionStepLabel');
+const finishNotice = document.getElementById('finishNotice');
+const reviewLastQuestionButton = document.getElementById('reviewLastQuestionButton');
+const confirmFinishButton = document.getElementById('confirmFinishButton');
 let activeAnswerId = `answer-${window.QUESTIONS[0]?.id || 1}`;
 let proctoringViolations = [];
 let missingFaceFrames = 0;
@@ -37,12 +48,17 @@ let warningTotal = 0;
 let tabSwitchTotal = 0;
 let submitted = false;
 let timerInterval;
+let totalTimerInterval;
+let progressTimer;
 let activeSection = '';
+let activeQuestionIndex = 0;
+const skippedQuestionIds = new Set();
 let cameraReady = false;
 let proctoringActive = false;
 let frameInterval;
 let proctoringNoticeAccepted = false;
 let aptitudeCompleted = false;
+let testStarted = false;
 const sectionDurations = window.SECTION_DURATIONS || {};
 const DEFAULT_SECTION_SECONDS = 20 * 60;
 const MIN_APTITUDE_ANSWERS = 5;
@@ -50,6 +66,15 @@ const sectionRemaining = {
   Aptitude: Number(sectionDurations.Aptitude) || DEFAULT_SECTION_SECONDS,
   Programming: Number(sectionDurations.Programming) || DEFAULT_SECTION_SECONDS,
 };
+let totalTestRemaining = Number(window.TOTAL_TEST_SECONDS) || (sectionRemaining.Aptitude + sectionRemaining.Programming);
+const proctoringSettings = window.PROCTORING_SETTINGS || {};
+const protectedTestEnabled = proctoringSettings.protected_test_enabled !== false;
+const tabSwitchWarningEnabled = proctoringSettings.tab_switch_enabled !== false;
+const focusWarningEnabled = proctoringSettings.focus_warning_enabled !== false;
+const cameraWarningEnabled = proctoringSettings.camera_warning_enabled !== false;
+const multipleFaceWarningEnabled = proctoringSettings.multiple_face_warning_enabled !== false;
+const tabSwitchLimit = Math.min(Math.max(Number(proctoringSettings.tab_switch_limit) || 5, 1), 100);
+const warningLimit = Math.min(Math.max(Number(proctoringSettings.warning_limit) || 10, 1), 100);
 const secureOrigin = `https://${location.host}`;
 const secureCurrentUrl = `${secureOrigin}${location.pathname}${location.search}${location.hash}`;
 const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -68,6 +93,12 @@ if (isInsecurePublicTunnel) {
 
 if (lanOriginValue) {
   lanOriginValue.textContent = lanOrigin;
+}
+
+if (!protectedTestEnabled) {
+  alarmMessage.innerText = 'Test protection is disabled by HR.';
+  warningCount.innerText = '0';
+  tabSwitchCount.innerText = '0';
 }
 
 copyLanOriginButton?.addEventListener('click', async () => {
@@ -117,7 +148,17 @@ nextSectionButton?.addEventListener('click', () => {
 
 startProgrammingButton?.addEventListener('click', () => startSection('Programming'));
 
-submitInterviewButton?.addEventListener('click', () => submitInterview());
+submitInterviewButton?.addEventListener('click', () => showFinishNotice());
+
+questionBackButton?.addEventListener('click', () => goToPreviousQuestion());
+
+questionNextButton?.addEventListener('click', () => goToNextQuestion());
+
+reviewLastQuestionButton?.addEventListener('click', () => {
+  finishNotice.hidden = true;
+});
+
+confirmFinishButton?.addEventListener('click', () => submitInterview());
 
 document.querySelectorAll('textarea').forEach((textarea) => {
   textarea.addEventListener('focus', () => {
@@ -130,7 +171,7 @@ document.addEventListener('cut', (event) => event.preventDefault());
 document.addEventListener('paste', (event) => event.preventDefault());
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 document.addEventListener('selectstart', (event) => {
-  if (!event.target.closest('textarea, input')) {
+  if (!event.target.closest('textarea, input, select')) {
     event.preventDefault();
   }
 });
@@ -176,6 +217,10 @@ async function startCamera() {
 }
 
 function showProctoringNotice() {
+  if (!protectedTestEnabled) {
+    proctoringNoticeAccepted = true;
+    return Promise.resolve(true);
+  }
   if (proctoringNoticeAccepted) return Promise.resolve(true);
   return new Promise((resolve) => {
     proctoringNotice.hidden = false;
@@ -200,7 +245,7 @@ function showProctoringNotice() {
 }
 
 function armProctoring() {
-  if (proctoringActive) return;
+  if (proctoringActive || !protectedTestEnabled) return;
   proctoringActive = true;
   alarmMessage.innerText = 'Monitoring camera and tab focus.';
   emotionStatus.innerText = 'Monitoring active';
@@ -210,6 +255,7 @@ function armProctoring() {
 }
 
 async function ensureCameraReady() {
+  if (!protectedTestEnabled) return true;
   if (cameraReady) return true;
   await startCamera();
   if (cameraReady) return true;
@@ -257,7 +303,7 @@ function getActiveQuestionContext() {
   const activeElement = document.activeElement;
   let questionCard = activeElement?.closest?.('.question-card');
   if (!questionCard || questionCard.hidden || questionCard.dataset.section !== activeSection) {
-    questionCard = document.querySelector(`.question-card[data-section="${activeSection}"]:not([hidden])`);
+    questionCard = getCurrentQuestionCard();
   }
   if (!questionCard) {
     return {
@@ -279,6 +325,11 @@ function getActiveQuestionContext() {
 
 function triggerAlarm(reason, kind = 'warning') {
   if (submitted || !proctoringActive) return;
+  if (!protectedTestEnabled) return;
+  if (kind === 'tab-switch' && !tabSwitchWarningEnabled) return;
+  if (kind === 'focus-change' && !focusWarningEnabled) return;
+  if (kind === 'missing-face' && !cameraWarningEnabled) return;
+  if (kind === 'multiple-face' && !multipleFaceWarningEnabled) return;
   const event = {
     reason,
     kind,
@@ -298,9 +349,9 @@ function triggerAlarm(reason, kind = 'warning') {
   playAlarmTone();
   showWarningPopup(reason);
   setTimeout(() => alarmBox.classList.remove('active'), 3500);
-  if (tabSwitchTotal >= 5) {
+  if (tabSwitchTotal >= tabSwitchLimit) {
     submitInterview('Auto submitted because tab switching reached the limit.');
-  } else if (warningTotal >= 10) {
+  } else if (warningTotal >= warningLimit) {
     submitInterview('Auto submitted because warning limit was reached.');
   }
 }
@@ -331,14 +382,14 @@ async function sendFrame() {
         const missingFaceMessage = isMobileDevice
           ? 'Face is fully out of camera. Please keep your face visible on the mobile screen.'
           : 'Suspicious camera activity: candidate face is continuously missing or fully turned away.';
-        triggerAlarm(missingFaceMessage);
+        triggerAlarm(missingFaceMessage, 'missing-face');
         missingFaceFrames = 0;
       }
     }
     if (data.multiple_faces && data.alert_level === 'danger') {
       multipleFaceFrames += 1;
       if (multipleFaceFrames >= multipleFaceLimit) {
-        triggerAlarm(data.alert_reason || 'Suspicious camera activity: multiple faces detected.');
+        triggerAlarm(data.alert_reason || 'Suspicious camera activity: multiple faces detected.', 'multiple-face');
         multipleFaceFrames = 0;
       }
     } else {
@@ -363,21 +414,27 @@ async function startSection(sectionName) {
   if (!(await ensureCameraReady())) return;
   armProctoring();
   requestFullscreenMode();
+  startTotalTestTimer();
   activeSection = sectionName;
+  activeQuestionIndex = 0;
   document.querySelectorAll('.test-section').forEach((item) => {
-    item.hidden = item.dataset.section !== sectionName;
+    item.hidden = true;
   });
   sectionLauncher.hidden = true;
   if (programmingTransition) {
     programmingTransition.hidden = true;
   }
-  nextSectionButton.hidden = sectionName !== 'Aptitude';
+  nextSectionButton.hidden = true;
   submitInterviewButton.hidden = sectionName !== 'Programming';
+  if (questionFloatNav) {
+    questionFloatNav.hidden = false;
+  }
+  showCurrentQuestion();
   updateSectionActions();
   timerSection.innerText = `${sectionName} Timer`;
   updateTimerDisplay();
   startSectionTimer();
-  const firstInput = document.querySelector(`.question-card[data-section="${sectionName}"] textarea, .question-card[data-section="${sectionName}"] input`);
+  const firstInput = getCurrentQuestionCard()?.querySelector('textarea, input, select');
   if (firstInput) {
     firstInput.focus();
     activeAnswerId = firstInput.id || activeAnswerId;
@@ -387,7 +444,8 @@ async function startSection(sectionName) {
 function isQuestionAnswered(question) {
   const answerBox = document.getElementById(`answer-${question.id}`);
   const selectedOption = document.querySelector(`input[name="answer-${question.id}"]:checked`);
-  return (answerBox && answerBox.value.trim().length > 0) || Boolean(selectedOption);
+  const tableAnswer = collectTableAnswer(question.id);
+  return (answerBox && answerBox.value.trim().length > 0) || Boolean(selectedOption) || tableAnswer.trim().length > 0;
 }
 
 function isSectionAnswered(sectionName) {
@@ -403,16 +461,210 @@ function sectionQuestionTotal(sectionName) {
   return window.QUESTIONS.filter((q) => q.category === sectionName).length;
 }
 
-function updateSectionActions() {
-  if (nextSectionButton) {
-    nextSectionButton.disabled = activeSection !== 'Aptitude' || sectionAnsweredCount('Aptitude') < MIN_APTITUDE_ANSWERS;
-  }
-  if (submitInterviewButton) {
-    submitInterviewButton.disabled = activeSection !== 'Programming' || !isSectionAnswered('Programming');
+function sectionQuestions(sectionName = activeSection) {
+  return window.QUESTIONS.filter((q) => q.category === sectionName);
+}
+
+function getCurrentQuestion() {
+  return sectionQuestions()[activeQuestionIndex];
+}
+
+function getCurrentQuestionCard() {
+  const question = getCurrentQuestion();
+  if (!question) return null;
+  return document.querySelector(`.question-card[data-question-id="${question.id}"]`);
+}
+
+function questionKey(question) {
+  return String(question?.id ?? '');
+}
+
+function markCurrentQuestionSkippedIfNeeded() {
+  const currentQuestion = getCurrentQuestion();
+  if (currentQuestion && !isQuestionAnswered(currentQuestion)) {
+    skippedQuestionIds.add(questionKey(currentQuestion));
   }
 }
 
+function clearSkippedIfAnswered(question) {
+  if (question && isQuestionAnswered(question)) {
+    skippedQuestionIds.delete(questionKey(question));
+  }
+}
+
+function reportProgress() {
+  if (!activeSection || submitted) return;
+  const question = getCurrentQuestion();
+  if (!question) return;
+  clearTimeout(progressTimer);
+  progressTimer = setTimeout(() => {
+    fetch('/api/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        section: activeSection,
+        question_number: activeQuestionIndex + 1,
+        question_text: question.question || '',
+      }),
+    }).catch(() => {});
+  }, 250);
+}
+
+function renderQuestionMap() {
+  if (!questionMapPanel || !questionDotGrid) return;
+  const questions = sectionQuestions();
+  if (!activeSection || !questions.length) {
+    questionMapPanel.hidden = true;
+    questionDotGrid.innerHTML = '';
+    return;
+  }
+  questionMapPanel.hidden = false;
+  if (questionMapRound) {
+    questionMapRound.innerText = `${activeSection} Round`;
+  }
+  if (questionMapSummary) {
+    const answered = sectionAnsweredCount(activeSection);
+    const skipped = questions.filter((question) => skippedQuestionIds.has(questionKey(question)) && !isQuestionAnswered(question)).length;
+    questionMapSummary.innerText = `${answered}/${questions.length} answered, ${skipped} skipped`;
+  }
+  questionDotGrid.innerHTML = questions.map((question, index) => {
+    const answered = isQuestionAnswered(question);
+    const skipped = skippedQuestionIds.has(questionKey(question)) && !answered;
+    const status = answered ? 'answered' : (skipped ? 'skipped' : 'unanswered');
+    const active = index === activeQuestionIndex ? ' active' : '';
+    return `<button class="question-dot ${status}${active}" type="button" data-question-index="${index}" aria-label="${activeSection} question ${index + 1} of ${questions.length}, ${status}">${index + 1}</button>`;
+  }).join('');
+}
+
+questionDotGrid?.addEventListener('click', (event) => {
+  const button = event.target.closest('.question-dot');
+  if (!button || !activeSection || submitted) return;
+  const targetIndex = Number(button.dataset.questionIndex);
+  if (!Number.isInteger(targetIndex) || targetIndex === activeQuestionIndex) return;
+  markCurrentQuestionSkippedIfNeeded();
+  activeQuestionIndex = targetIndex;
+  showCurrentQuestion();
+  const input = getCurrentQuestionCard()?.querySelector('textarea, input:checked, input, select');
+  if (input) {
+    input.focus();
+    activeAnswerId = input.id || activeAnswerId;
+  }
+});
+
+function showCurrentQuestion() {
+  const questions = sectionQuestions();
+  const total = questions.length;
+  document.querySelectorAll('.section-divider').forEach((item) => {
+    item.hidden = true;
+  });
+  document.querySelectorAll('.question-card').forEach((item) => {
+    item.hidden = true;
+  });
+  if (!activeSection || !total) {
+    if (questionFloatNav) questionFloatNav.hidden = true;
+    renderQuestionMap();
+    return;
+  }
+  activeQuestionIndex = Math.min(Math.max(activeQuestionIndex, 0), total - 1);
+  const card = getCurrentQuestionCard();
+  if (card) {
+    card.hidden = false;
+    card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+  if (questionFloatNav) {
+    questionFloatNav.hidden = false;
+  }
+  renderQuestionMap();
+  updateQuestionNavigation();
+  reportProgress();
+}
+
+function updateQuestionNavigation() {
+  const questions = sectionQuestions();
+  const total = questions.length;
+  const currentQuestion = getCurrentQuestion();
+  const isLastQuestion = activeQuestionIndex >= total - 1;
+  if (questionStepLabel) {
+    questionStepLabel.innerText = total
+      ? `${activeSection} Question ${activeQuestionIndex + 1} of ${total}`
+      : 'No question available';
+  }
+  if (questionBackButton) {
+    questionBackButton.disabled = activeQuestionIndex <= 0;
+  }
+  if (questionNextButton) {
+    questionNextButton.disabled = !currentQuestion || !isQuestionAnswered(currentQuestion);
+    if (activeSection === 'Aptitude') {
+      questionNextButton.textContent = isLastQuestion ? 'Next Programming Session' : 'Next';
+    } else {
+      questionNextButton.textContent = isLastQuestion ? 'Finish Test' : 'Next';
+    }
+  }
+  if (submitInterviewButton) {
+    submitInterviewButton.hidden = activeSection !== 'Programming' || !isLastQuestion;
+    submitInterviewButton.disabled = activeSection !== 'Programming' || !currentQuestion || !isQuestionAnswered(currentQuestion);
+  }
+}
+
+function goToPreviousQuestion() {
+  if (!activeSection || submitted || activeQuestionIndex <= 0) return;
+  markCurrentQuestionSkippedIfNeeded();
+  activeQuestionIndex -= 1;
+  showCurrentQuestion();
+  const input = getCurrentQuestionCard()?.querySelector('textarea, input:checked, input, select');
+  if (input) {
+    input.focus();
+    activeAnswerId = input.id || activeAnswerId;
+  }
+}
+
+function goToNextQuestion() {
+  if (!activeSection || submitted) return;
+  const currentQuestion = getCurrentQuestion();
+  if (currentQuestion && !isQuestionAnswered(currentQuestion)) {
+    showWarningPopup('Please answer this question before continuing.');
+    updateQuestionNavigation();
+    return;
+  }
+  const total = sectionQuestionTotal(activeSection);
+  if (activeQuestionIndex < total - 1) {
+    clearSkippedIfAnswered(currentQuestion);
+    activeQuestionIndex += 1;
+    showCurrentQuestion();
+    const input = getCurrentQuestionCard()?.querySelector('textarea, input, select');
+    if (input) {
+      input.focus();
+      activeAnswerId = input.id || activeAnswerId;
+    }
+    return;
+  }
+  if (activeSection === 'Aptitude') {
+    clearSkippedIfAnswered(currentQuestion);
+    aptitudeCompleted = true;
+    showProgrammingTransition();
+    return;
+  }
+  clearSkippedIfAnswered(currentQuestion);
+  showFinishNotice();
+}
+
+function updateSectionActions() {
+  if (nextSectionButton) {
+    nextSectionButton.hidden = true;
+  }
+  updateQuestionNavigation();
+}
+
 function showProgrammingTransition() {
+  fetch('/api/progress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      section: 'Aptitude completed',
+      question_number: null,
+      question_text: 'Waiting to start Programming',
+    }),
+  }).catch(() => {});
   activeSection = '';
   clearInterval(timerInterval);
   document.querySelectorAll('.test-section').forEach((item) => {
@@ -424,10 +676,17 @@ function showProgrammingTransition() {
   }
   nextSectionButton.hidden = true;
   submitInterviewButton.hidden = true;
+  if (questionFloatNav) {
+    questionFloatNav.hidden = true;
+  }
+  if (questionMapPanel) {
+    questionMapPanel.hidden = true;
+  }
   timerSection.innerText = 'Aptitude completed';
   progressSection.innerText = 'Programming';
   answeredCountDisplay.innerText = '0';
   sectionQuestionCount.innerText = sectionQuestionTotal('Programming');
+  updateTimerDisplay('Programming');
 }
 
 function showSectionLauncher() {
@@ -437,6 +696,12 @@ function showSectionLauncher() {
   sectionLauncher.hidden = false;
   if (programmingTransition) {
     programmingTransition.hidden = true;
+  }
+  if (questionFloatNav) {
+    questionFloatNav.hidden = true;
+  }
+  if (questionMapPanel) {
+    questionMapPanel.hidden = true;
   }
   if (programmingLauncher && aptitudeCompleted) {
     programmingLauncher.classList.remove('locked');
@@ -484,8 +749,23 @@ function startSectionTimer() {
   }, 1000);
 }
 
-function updateTimerDisplay() {
-  const remaining = Math.max(sectionRemaining[activeSection] ?? DEFAULT_SECTION_SECONDS, 0);
+function startTotalTestTimer() {
+  if (testStarted || submitted) return;
+  testStarted = true;
+  clearInterval(totalTimerInterval);
+  totalTimerInterval = setInterval(() => {
+    if (submitted) return;
+    totalTestRemaining -= 1;
+    if (totalTestRemaining <= 0) {
+      submitInterview('Total interview time limit ended. Test auto submitted.');
+    }
+  }, 1000);
+}
+
+function updateTimerDisplay(sectionName = activeSection) {
+  const fallbackSection = aptitudeCompleted ? 'Programming' : 'Aptitude';
+  const displaySection = sectionName || fallbackSection;
+  const remaining = Math.max(sectionRemaining[displaySection] ?? DEFAULT_SECTION_SECONDS, 0);
   const minutes = String(Math.floor(remaining / 60)).padStart(2, '0');
   const seconds = String(remaining % 60).padStart(2, '0');
   timerDisplay.innerText = `${minutes}:${seconds}`;
@@ -493,11 +773,30 @@ function updateTimerDisplay() {
 
 function updateAnsweredCount() {
   const sectionName = activeSection || (aptitudeCompleted ? 'Programming' : 'Aptitude');
+  if (activeSection) {
+    const currentQuestion = getCurrentQuestion();
+    clearSkippedIfAnswered(currentQuestion);
+  }
   const count = sectionAnsweredCount(sectionName);
   progressSection.innerText = sectionName;
   sectionQuestionCount.innerText = sectionQuestionTotal(sectionName);
   answeredCountDisplay.innerText = count;
+  renderQuestionMap();
   updateSectionActions();
+  reportProgress();
+}
+
+function showFinishNotice() {
+  if (!isSectionAnswered('Programming')) {
+    showWarningPopup('Please answer all Programming questions before submitting.');
+    return;
+  }
+  if (finishNotice) {
+    finishNotice.hidden = false;
+    confirmFinishButton?.focus();
+    return;
+  }
+  submitInterview();
 }
 
 function startSpeech() {
@@ -516,6 +815,7 @@ function startSpeech() {
   recognition.onresult = (event) => {
     const text = event.results[0][0].transcript;
     const box = document.getElementById(activeAnswerId);
+    if (!box) return;
     box.value = `${box.value} ${text}`.trim();
     updateAnsweredCount();
   };
@@ -523,19 +823,47 @@ function startSpeech() {
   recognition.start();
 }
 
+function collectTableAnswer(questionId) {
+  const tableWrap = document.querySelector(`[data-table-answer="${questionId}"]`);
+  if (!tableWrap) return '';
+  const rows = [...tableWrap.querySelectorAll('tbody tr')];
+  const answerRows = rows.map((row, index) => {
+    const pan = row.querySelector('[data-pan-field="pan"]')?.value.trim() || '';
+    const result = row.querySelector('[data-pan-field="result"]')?.value.trim() || '';
+    const remarks = row.querySelector('[data-pan-field="remarks"]')?.value.trim() || '';
+    return {
+      id: `TC ${String(index + 1).padStart(2, '0')}`,
+      pan,
+      result,
+      remarks,
+    };
+  });
+  const hasAnswer = answerRows.some((row) => row.pan || row.result || row.remarks);
+  if (!hasAnswer) return '';
+  return [
+    '| Test Case ID | PAN Number | Result | Remarks |',
+    '| --- | --- | --- | --- |',
+    ...answerRows.map((row) => `| ${row.id} | ${row.pan || '-'} | ${row.result || '-'} | ${row.remarks || '-'} |`),
+  ].join('\n');
+}
+
 async function submitInterview(autoSubmitReason = '') {
   if (submitted) return;
   submitted = true;
+  clearTimeout(progressTimer);
   clearInterval(timerInterval);
+  clearInterval(totalTimerInterval);
   clearInterval(frameInterval);
-  document.querySelectorAll('button, input, textarea').forEach((control) => {
+  document.querySelectorAll('button, input, textarea, select').forEach((control) => {
     control.disabled = true;
   });
   const answers = {};
   window.QUESTIONS.forEach((q) => {
     const selectedOption = document.querySelector(`input[name="answer-${q.id}"]:checked`);
     const answerBox = document.getElementById(`answer-${q.id}`);
-    answers[q.id] = selectedOption ? selectedOption.value : (answerBox ? answerBox.value.trim() : '');
+    const tableAnswer = collectTableAnswer(q.id);
+    const typedAnswer = answerBox ? answerBox.value.trim() : '';
+    answers[q.id] = selectedOption ? selectedOption.value : (tableAnswer || typedAnswer);
   });
   const res = await fetch('/api/submit', {
     method: 'POST',

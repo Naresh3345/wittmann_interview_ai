@@ -26,8 +26,8 @@
     <div class="alarm-box" id="alarmBox">
       <strong>Proctoring Alerts</strong>
       <span><span id="violationCount">0</span> suspicious activities detected</span>
-      <span><span id="tabSwitchCount">0</span>/5 tab switches</span>
-      <span><span id="warningCount">0</span>/10 warnings</span>
+      <span><span id="tabSwitchCount">0</span>/<span id="tabSwitchLimit">{{ proctoring_settings.tab_switch_limit }}</span> tab switches</span>
+      <span><span id="warningCount">0</span>/<span id="warningLimit">{{ proctoring_settings.warning_limit }}</span> warnings</span>
       <small id="alarmMessage">Proctoring starts after you start the test.</small>
     </div>
     <div class="timer-box">
@@ -52,9 +52,24 @@
       <div class="interview-actions">
         <div class="progress"><span id="progressSection">Aptitude</span>: <span id="answeredCount">0</span>/<span id="sectionQuestionCount">0</span> answered</div>
         <button class="btn ghost" id="nextSectionButton" type="button" hidden>Next: Programming</button>
-        <button class="btn primary" id="submitInterviewButton" type="button" hidden>Submit Test</button>
+        <button class="btn primary top-submit" id="submitInterviewButton" type="button" hidden>Submit Test</button>
       </div>
     </div>
+
+    <section class="question-map-panel" id="questionMapPanel" hidden>
+      <div class="question-map-heading">
+        <div>
+          <p class="eyebrow" id="questionMapRound">Aptitude Round</p>
+          <strong id="questionMapSummary">0 questions</strong>
+        </div>
+        <div class="question-map-legend" aria-label="Question status legend">
+          <span><i class="legend-dot answered"></i>Answered</span>
+          <span><i class="legend-dot unanswered"></i>Not answered</span>
+          <span><i class="legend-dot skipped"></i>Skipped</span>
+        </div>
+      </div>
+      <div class="question-dot-grid" id="questionDotGrid" aria-label="Question navigation"></div>
+    </section>
 
     <div id="questions">
       <section class="section-launcher" id="sectionLauncher">
@@ -99,7 +114,10 @@
       {% set ns.section_index = ns.section_index + 1 %}
       <article class="question-card test-section" data-section="{{ q.category }}" data-question-id="{{ q.id }}" hidden>
         <div class="question-meta"><span>{{ q.category }}</span><span>{{ q.difficulty }}</span></div>
-        <h3>{{ ns.section_index }}. {{ q.question | replace('\n', '<br>') | safe }}</h3>
+        <div class="question-prompt">
+          <span class="question-number">{{ ns.section_index }}.</span>
+          <div>{{ q.question | question_content }}</div>
+        </div>
         {% if q.options %}
         <div class="option-list" data-answer-group="{{ q.id }}">
           {% for option in q.options %}
@@ -110,10 +128,48 @@
           {% endfor %}
         </div>
         {% else %}
-        <textarea id="answer-{{ q.id }}" oninput="updateAnsweredCount()" placeholder="Type your final answer here..."></textarea>
+        {% if "PAN number validation" in q.question %}
+        <div class="pan-answer-wrap" data-table-answer="{{ q.id }}">
+          <table class="pan-answer-table">
+            <thead>
+              <tr>
+                <th>Test Case ID</th>
+                <th>PAN Number</th>
+                <th>Result</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for case_no in range(1, 6) %}
+              <tr>
+                <td>TC {{ "%02d"|format(case_no) }}</td>
+                <td><input type="text" data-pan-field="pan" aria-label="TC {{ case_no }} PAN Number" oninput="updateAnsweredCount()"></td>
+                <td>
+                  <select data-pan-field="result" aria-label="TC {{ case_no }} Result" onchange="updateAnsweredCount()">
+                    <option value="">Select</option>
+                    <option value="Valid">Valid</option>
+                    <option value="Invalid">Invalid</option>
+                  </select>
+                </td>
+                <td><textarea data-pan-field="remarks" aria-label="TC {{ case_no }} Remarks" oninput="updateAnsweredCount()" placeholder="Reason for valid/invalid"></textarea></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+        <textarea id="answer-{{ q.id }}" oninput="updateAnsweredCount()" placeholder="{{ 'Additional notes, if any...' if 'PAN number validation' in q.question else 'Type your final answer here...' }}"></textarea>
         {% endif %}
       </article>
       {% endfor %}
+    </div>
+
+    <div class="question-float-nav" id="questionFloatNav" hidden>
+      <span id="questionStepLabel">Question 1 of 1</span>
+      <div class="question-nav-actions">
+        <button class="btn ghost" id="questionBackButton" type="button">Back</button>
+        <button class="btn primary" id="questionNextButton" type="button">Next</button>
+      </div>
     </div>
 
     <section id="results" class="results" hidden></section>
@@ -122,7 +178,7 @@
 <div class="notice-modal" id="proctoringNotice" hidden>
   <div class="notice-dialog" role="dialog" aria-modal="true" aria-labelledby="proctoringNoticeTitle">
     <strong id="proctoringNoticeTitle">Before You Start</strong>
-    <p>Be aware that suspicious activity such as tab switching, missing face, or multiple faces will be notified during the test. If the warning limit is reached, the test will be automatically submitted.</p>
+    <p>{{ "This test is protected. Suspicious activity warnings may auto-submit the test when the HR-set limit is reached." if proctoring_settings.protected_test_enabled else "This test is not protected. Proctoring warnings are currently disabled by HR." }}</p>
     <div class="notice-actions">
       <button class="btn ghost" id="cancelProctoringNotice" type="button">Cancel</button>
       <button class="btn primary" id="acceptProctoringNotice" type="button">I Understand, Start Test</button>
@@ -133,12 +189,24 @@
   <strong>Warning</strong>
   <p id="warningPopupMessage"></p>
 </div>
+<div class="notice-modal" id="finishNotice" hidden>
+  <div class="notice-dialog" role="dialog" aria-modal="true" aria-labelledby="finishNoticeTitle">
+    <strong id="finishNoticeTitle">Programming Completed</strong>
+    <p>You have completed all questions. Click Submit Test to finish your interview.</p>
+    <div class="notice-actions">
+      <button class="btn ghost" id="reviewLastQuestionButton" type="button">Review Last Question</button>
+      <button class="btn primary" id="confirmFinishButton" type="button">Submit Test</button>
+    </div>
+  </div>
+</div>
 <script id="questions-data" type="application/json">
   {{ questions | tojson(indent=2) | safe }}
 </script>
 <script>
   window.QUESTIONS = JSON.parse(document.getElementById('questions-data').textContent);
   window.SECTION_DURATIONS = {{ section_durations | tojson | safe }};
+  window.TOTAL_TEST_SECONDS = {{ total_test_seconds | tojson | safe }};
+  window.PROCTORING_SETTINGS = {{ proctoring_settings | tojson | safe }};
 </script>
 <script src="{{ url_for('static', filename='js/interview.js') }}"></script>
 {% endblock %}

@@ -13,6 +13,7 @@
       <input type="radio" name="role_id" value="{{ role.role_id }}" required>
       <span>{{ role.role_name }}</span>
       <small>Section 1: Aptitude | Section 2: Programming output tests</small>
+      <small>Question set: {{ role.allowed_question_sets or "All available sets" }}</small>
       <small>Allowed degree: {{ role.allowed_degrees or "Any degree" }}</small>
     </label>
     {% endfor %}

@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
+from markupsafe import Markup, escape
 
 from utils.ai_wrapper import ai_wrapper
 from utils.database import (
@@ -31,6 +32,7 @@ from utils.database import (
     create_interview,
     create_user,
     get_test_link,
+    get_proctoring_settings,
     init_db,
     load_interview_questions,
     list_reports,
@@ -39,6 +41,7 @@ from utils.database import (
     mark_test_link_used,
     save_candidate_answers,
     save_interview_questions,
+    update_interview_progress,
 )
 from utils.question_bank import ensure_question_bank_indexes, select_questions_for_role
 from utils.report import generate_pdf_report
@@ -58,6 +61,84 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
 app.config["PREFERRED_URL_SCHEME"] = "https"
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+
+
+def _is_markdown_table_line(line):
+    stripped = line.strip()
+    return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+
+
+def _is_markdown_separator(line):
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell or "") for cell in cells)
+
+
+def _render_markdown_table(lines):
+    rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines]
+    has_header = len(rows) > 1 and _is_markdown_separator(lines[1])
+    header = rows[0] if has_header else []
+    body = rows[2:] if has_header else rows
+    html = ['<div class="question-table-wrap"><table class="question-data-table">']
+    if header:
+        html.append("<thead><tr>")
+        html.extend(f"<th>{escape(cell)}</th>" for cell in header)
+        html.append("</tr></thead>")
+    html.append("<tbody>")
+    for row in body:
+        html.append("<tr>")
+        html.extend(f"<td>{escape(cell)}</td>" for cell in row)
+        html.append("</tr>")
+    html.append("</tbody></table></div>")
+    return "".join(html)
+
+
+def question_content_html(value):
+    lines = str(value or "").splitlines()
+    html = []
+    paragraph = []
+
+    def flush_paragraph():
+        if paragraph:
+            html.append(f"<p>{'<br>'.join(escape(line) for line in paragraph)}</p>")
+            paragraph.clear()
+
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        image_match = re.fullmatch(r"\[\[image:(.+?)\]\]", stripped)
+        if image_match:
+            flush_paragraph()
+            src = image_match.group(1).strip()
+            if src.startswith("static/"):
+                src = f"/{src}"
+            elif src.startswith("question_assets/"):
+                src = f"/static/{src}"
+            elif not src.startswith(("/static/", "http://", "https://")):
+                src = f"/static/question_assets/{src}"
+            html.append(
+                f'<figure class="question-image-figure"><img src="{escape(src)}" alt="Question reference image"></figure>'
+            )
+            index += 1
+            continue
+        if _is_markdown_table_line(line):
+            flush_paragraph()
+            table_lines = []
+            while index < len(lines) and _is_markdown_table_line(lines[index]):
+                table_lines.append(lines[index])
+                index += 1
+            html.append(_render_markdown_table(table_lines))
+            continue
+        if stripped:
+            paragraph.append(line)
+        else:
+            flush_paragraph()
+        index += 1
+    flush_paragraph()
+    return Markup("".join(html))
+
+
+app.jinja_env.filters["question_content"] = question_content_html
 
 
 @app.after_request
@@ -484,20 +565,54 @@ def admin_key_is_valid():
 
 
 def proctoring_rejected(proctoring_violations):
-    warning_count = len(proctoring_violations)
-    tab_switch_count = sum(1 for item in proctoring_violations if item.get("kind") == "tab-switch")
-    return tab_switch_count >= 5 or warning_count >= 10
+    settings = get_proctoring_settings()
+    if not settings.get("protected_test_enabled", True):
+        return False
+    tab_switch_limit = int(settings.get("tab_switch_limit") or 5)
+    warning_limit = int(settings.get("warning_limit") or 10)
+    allowed_kinds = {"warning"}
+    if settings.get("tab_switch_enabled", True):
+        allowed_kinds.add("tab-switch")
+    if settings.get("focus_warning_enabled", True):
+        allowed_kinds.add("focus-change")
+    if settings.get("camera_warning_enabled", True):
+        allowed_kinds.add("missing-face")
+    if settings.get("multiple_face_warning_enabled", True):
+        allowed_kinds.add("multiple-face")
+    counted_violations = [item for item in proctoring_violations if item.get("kind", "warning") in allowed_kinds]
+    warning_count = len(counted_violations)
+    tab_switch_count = sum(1 for item in counted_violations if item.get("kind") == "tab-switch")
+    return tab_switch_count >= tab_switch_limit or warning_count >= warning_limit
 
 
-def shortlist_candidate(overall_score, proctoring_violations):
+def shortlist_candidate(earned_marks, proctoring_violations, shortlist_min_marks=0):
     violation_count = len(proctoring_violations)
+    cutoff = float(shortlist_min_marks or SHORTLIST_MIN_SCORE)
     if proctoring_rejected(proctoring_violations):
         return "Rejected", "Candidate was rejected because the tab switch or warning limit was reached."
-    if overall_score >= SHORTLIST_MIN_SCORE and violation_count <= 2:
-        return "Shortlisted", f"Candidate met the {SHORTLIST_MIN_SCORE:g} marks benchmark with acceptable proctoring activity."
+    if earned_marks >= cutoff and violation_count <= 2:
+        return "Shortlisted", f"Candidate met the {cutoff:g} marks benchmark with acceptable proctoring activity."
     if violation_count > 2:
         return "Needs Review", "Candidate score requires manual review because proctoring alerts were triggered."
-    return "Not Shortlisted", f"Candidate did not meet the minimum shortlist score of {SHORTLIST_MIN_SCORE:g} marks."
+    return "Not Shortlisted", f"Candidate did not meet the minimum shortlist score of {cutoff:g} marks."
+
+
+def calculate_weighted_score(results):
+    total_marks = 0.0
+    earned_marks = 0.0
+    for result in results:
+        question = result.get("question") or {}
+        try:
+            marks = float(question.get("marks") or 0)
+        except (TypeError, ValueError):
+            marks = 0.0
+        if marks <= 0:
+            marks = 1.0
+        score = float(result.get("score", {}).get("total_score") or 0)
+        total_marks += marks
+        earned_marks += (marks * score) / 100
+    percent = round((earned_marks / total_marks) * 100, 2) if total_marks else 0
+    return percent, round(earned_marks, 2), round(total_marks, 2)
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -697,6 +812,11 @@ def select_role():
     roles = list_roles()
     if request.args.get("role_error") == "degree":
         error = "You cannot attend this interview. Your degree is not eligible for the selected role."
+    elif request.args.get("role_error") == "paper":
+        error = session.pop(
+            "role_error_message",
+            "This role's question paper is not ready. Please contact HR.",
+        )
     else:
         error = ""
     if request.method == "POST":
@@ -793,6 +913,10 @@ def interview():
     allowed_question_sets = allowed_question_sets or ""
     aptitude_minutes = role.get("aptitude_minutes") if isinstance(role, dict) else getattr(role, "aptitude_minutes", 20)
     programming_minutes = role.get("programming_minutes") if isinstance(role, dict) else getattr(role, "programming_minutes", 20)
+    total_paper_marks = role.get("total_paper_marks") if isinstance(role, dict) else getattr(role, "total_paper_marks", 0)
+    total_paper_marks = int(total_paper_marks or 0)
+    shortlist_min_marks = role.get("shortlist_min_marks") if isinstance(role, dict) else getattr(role, "shortlist_min_marks", 0)
+    session["shortlist_min_marks"] = float(shortlist_min_marks or 0)
     resume_path = session.get("candidate", {}).get("resume_path", "")
     resume_text = extract_resume_text(resume_path) if resume_path else ""
     candidate_degree = session.get("candidate", {}).get("candidate_degree", "")
@@ -801,18 +925,34 @@ def interview():
         session.pop("role_name", None)
         session.pop("terms_accepted", None)
         return redirect(url_for("select_role", role_error="degree"))
-    questions = select_questions_for_role(role_slug, allowed_question_sets=allowed_question_sets)
+    try:
+        questions = select_questions_for_role(
+            role_slug,
+            allowed_question_sets=allowed_question_sets,
+            total_paper_marks=total_paper_marks,
+        )
+    except ValueError as exc:
+        session.pop("role_id", None)
+        session.pop("role_name", None)
+        session.pop("terms_accepted", None)
+        session.pop("camera_check_passed", None)
+        session["role_error_message"] = str(exc)
+        return redirect(url_for("select_role", role_error="paper"))
     save_interview_questions(interview_id, questions)
+    proctoring_settings = get_proctoring_settings()
+    section_durations = {
+        "Aptitude": max(int(aptitude_minutes or 20), 1) * 60,
+        "Programming": max(int(programming_minutes or 20), 1) * 60,
+    }
 
     return render_template(
         "interview.html",
         questions=questions,
         candidate=session.get("candidate", {}),
         role_name=session.get("role_name", ""),
-        section_durations={
-            "Aptitude": max(int(aptitude_minutes or 20), 1) * 60,
-            "Programming": max(int(programming_minutes or 20), 1) * 60,
-        },
+        section_durations=section_durations,
+        total_test_seconds=sum(section_durations.values()),
+        proctoring_settings=proctoring_settings,
         company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
 
@@ -846,6 +986,25 @@ def api_questions():
     if session.get("interview_id"):
         return jsonify(load_interview_questions(session["interview_id"]))
     return jsonify(load_questions())
+
+
+@app.route("/api/progress", methods=["POST"])
+def update_progress():
+    interview_id = session.get("interview_id")
+    if not interview_id:
+        return jsonify({"updated": False}), 400
+    payload = request.get_json(silent=True) or {}
+    try:
+        question_number = int(payload.get("question_number") or 0) or None
+    except (TypeError, ValueError):
+        question_number = None
+    update_interview_progress(
+        interview_id,
+        section=str(payload.get("section") or "").strip(),
+        question_number=question_number,
+        question_text=str(payload.get("question_text") or "").strip()[:1000],
+    )
+    return jsonify({"updated": True})
 
 
 @app.route("/api/analyze-frame", methods=["POST"])
@@ -894,9 +1053,9 @@ def analyze_frame():
             face_center_x = (x + (w / 2)) / frame_w
             face_center_y = (y + (h / 2)) / frame_h
             face_centered = (
-                abs(face_center_x - 0.5) <= 0.18
-                and abs(face_center_y - 0.46) <= 0.22
-                and 0.06 <= face_ratio <= 0.55
+                abs(face_center_x - 0.5) <= 0.28
+                and abs(face_center_y - 0.5) <= 0.32
+                and 0.035 <= face_ratio <= 0.70
                 and not has_multiple_people
             )
             if 0.08 <= face_ratio <= 0.45:
@@ -923,7 +1082,7 @@ def analyze_frame():
                     "cy": face_center_y,
                 },
                 "emotion": emotion,
-                "confidence_hint": "Face is centered. Keep looking at the camera." if face_centered else "Keep your face visible and near the center.",
+                "confidence_hint": "Tested OK. Face is visible." if face_centered else "Keep your face visible in the camera.",
                 "alert_level": "danger" if has_multiple_people else "ok",
                 "alert_reason": "Multiple people detected in camera frame." if has_multiple_people else "",
             }
@@ -958,7 +1117,7 @@ def submit_interview():
         )
 
     interview_id = session.get("interview_id")
-    overall = round(sum(r["score"]["total_score"] for r in results) / max(len(results), 1), 2)
+    overall_percent, earned_marks, total_marks = calculate_weighted_score(results)
     if interview_id:
         save_candidate_answers(interview_id, results)
 
@@ -973,14 +1132,18 @@ def submit_interview():
         "confidence_index": round(((stats.get("detected_frames", 0) / total) * 55) + ((stats.get("stable_frames", 0) / total) * 30) + ((stats.get("smile_frames", 0) / total) * 15), 2),
         "proctoring_violations": proctoring_violations,
         "auto_submit_reason": auto_submit_reason,
+        "earned_marks": earned_marks,
+        "total_marks": total_marks,
+        "overall_score": overall_percent,
     }
-    shortlist_status, shortlist_reason = shortlist_candidate(overall, proctoring_violations)
+    shortlist_min_marks = session.get("shortlist_min_marks", 0)
+    shortlist_status, shortlist_reason = shortlist_candidate(earned_marks, proctoring_violations, shortlist_min_marks)
     face_summary["shortlist_status"] = shortlist_status
     face_summary["shortlist_reason"] = shortlist_reason
     report_path = generate_pdf_report(candidate_name, results, face_summary, str(REPORT_DIR))
     session["last_report"] = report_path
     if interview_id:
-        complete_interview(interview_id, overall, report_path, shortlist_status, shortlist_reason)
+        complete_interview(interview_id, earned_marks, report_path, shortlist_status, shortlist_reason)
 
     rejected = proctoring_rejected(proctoring_violations)
     completion = {
