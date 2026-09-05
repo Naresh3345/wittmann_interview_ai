@@ -138,18 +138,17 @@ def select_programming_questions(pool, count):
     target_sql = min(target_sql, count)
     if len(sql_pool) < SQL_PROGRAMMING_MIN:
         target_sql = len(sql_pool)
-    chosen = choose_least_assigned(sql_pool, target_sql)
-    remaining_count = count - len(chosen)
-    chosen_ids = {item["question_id"] for item in chosen}
+    chosen_sql = choose_least_assigned(sql_pool, target_sql)
+    remaining_count = count - len(chosen_sql)
+    chosen_ids = {item["question_id"] for item in chosen_sql}
     remaining_pool = [item for item in non_sql_pool if item["question_id"] not in chosen_ids]
     if len(remaining_pool) < remaining_count:
         remaining_pool.extend(
             item for item in sql_pool
             if item["question_id"] not in chosen_ids
         )
-    chosen.extend(choose_least_assigned(remaining_pool, remaining_count))
-    random.shuffle(chosen)
-    return chosen
+    chosen_non_sql = choose_least_assigned(remaining_pool, remaining_count)
+    return list(chosen_sql) + list(chosen_non_sql)
 
 
 def apply_paper_marks(questions, total_paper_marks=0):
@@ -221,6 +220,45 @@ def select_questions_for_role(role_slug, excluded_ids=None, allowed_question_set
             )
 
     return apply_paper_marks([normalize_question(item) for item in selected], total_paper_marks)
+
+
+def select_ai_interview_questions(role_slug, max_questions=15, allowed_question_sets=""):
+    try:
+        limit = min(max(int(max_questions or 15), 1), 15)
+    except (TypeError, ValueError):
+        limit = 15
+    question_sets = parse_question_sets(allowed_question_sets)
+    params = [role_slug]
+    set_sql = ""
+    if question_sets:
+        set_sql = "AND question_set = ANY(%s)"
+        params.append(question_sets)
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM question_bank
+            WHERE role_slug = %s
+              AND section IN ('AI Interview', 'AI HR Interview', 'HR Interview')
+              {set_sql}
+              AND active = TRUE
+              AND deleted_at IS NULL
+            """,
+            tuple(params),
+        ).fetchall()
+        chosen = choose_least_assigned(rows, min(limit, len(rows))) if rows else []
+        if chosen:
+            conn.execute(
+                """
+                UPDATE question_bank
+                SET assignment_count = assignment_count + 1,
+                    last_assigned_at = %s,
+                    updated_at = %s
+                WHERE question_id = ANY(%s)
+                """,
+                (datetime.now(), datetime.now(), [item["question_id"] for item in chosen]),
+            )
+    return [normalize_question(item) for item in chosen]
 
 
 def import_questions_from_json(path):

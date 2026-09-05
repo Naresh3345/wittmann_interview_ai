@@ -23,8 +23,21 @@ const sectionLauncher = document.getElementById('sectionLauncher');
 const nextSectionButton = document.getElementById('nextSectionButton');
 const submitInterviewButton = document.getElementById('submitInterviewButton');
 const programmingLauncher = document.getElementById('programmingLauncher');
+const aiInterviewLauncher = document.getElementById('aiInterviewLauncher');
 const programmingTransition = document.getElementById('programmingTransition');
+const aiInterviewTransition = document.getElementById('aiInterviewTransition');
 const startProgrammingButton = document.getElementById('startProgrammingButton');
+const startAiInterviewLauncher = document.getElementById('startAiInterviewLauncher');
+const startAiInterviewButton = document.getElementById('startAiInterviewButton');
+const aiInterviewPanel = document.getElementById('aiInterviewPanel');
+const aiInterviewStatus = document.getElementById('aiInterviewStatus');
+const aiQuestionCounter = document.getElementById('aiQuestionCounter');
+const aiSubtitle = document.getElementById('aiSubtitle');
+const candidateSubtitle = document.getElementById('candidateSubtitle');
+const aiManualAnswer = document.getElementById('aiManualAnswer');
+const repeatAiQuestionButton = document.getElementById('repeatAiQuestionButton');
+const saveAiAnswerButton = document.getElementById('saveAiAnswerButton');
+const finishAiInterviewButton = document.getElementById('finishAiInterviewButton');
 const progressSection = document.getElementById('progressSection');
 const answeredCountDisplay = document.getElementById('answeredCount');
 const sectionQuestionCount = document.getElementById('sectionQuestionCount');
@@ -58,15 +71,36 @@ let proctoringActive = false;
 let frameInterval;
 let proctoringNoticeAccepted = false;
 let aptitudeCompleted = false;
+let programmingCompleted = false;
+let aiInterviewStarted = false;
+let aiInterviewCompleted = false;
 let testStarted = false;
 const sectionDurations = window.SECTION_DURATIONS || {};
+const enabledSections = window.ENABLED_SECTIONS || { Aptitude: true, Programming: true, 'AI Interview': false };
+const aiInterviewQuestions = window.AI_INTERVIEW_QUESTIONS || [];
 const DEFAULT_SECTION_SECONDS = 20 * 60;
 const MIN_APTITUDE_ANSWERS = 5;
 const sectionRemaining = {
   Aptitude: Number(sectionDurations.Aptitude) || DEFAULT_SECTION_SECONDS,
   Programming: Number(sectionDurations.Programming) || DEFAULT_SECTION_SECONDS,
+  'AI Interview': Number(sectionDurations['AI Interview']) || (25 * 60),
 };
-let totalTestRemaining = Number(window.TOTAL_TEST_SECONDS) || (sectionRemaining.Aptitude + sectionRemaining.Programming);
+let totalTestRemaining = Number(window.TOTAL_TEST_SECONDS) || Object.entries(sectionRemaining).reduce((total, [section, seconds]) => {
+  return total + (enabledSections[section] ? seconds : 0);
+}, 0);
+let aiRecognition;
+let isListeningToCandidate = false;
+let aiCurrentIndex = 0;
+let aiCurrentTurn = null;
+let aiTranscript = [];
+let aiInterviewStartedAt = '';
+let aiReportSaved = false;
+let aiAnswerTimer;
+let aiAnswerStatusTimer;
+let aiMediaRecorder;
+let aiAudioStream;
+let aiAudioChunks = [];
+let aiAudioSaved = false;
 const proctoringSettings = window.PROCTORING_SETTINGS || {};
 const protectedTestEnabled = proctoringSettings.protected_test_enabled !== false;
 const tabSwitchWarningEnabled = proctoringSettings.tab_switch_enabled !== false;
@@ -86,6 +120,10 @@ const multipleFaceLimit = isMobileDevice ? 4 : 2;
 const isLanHttp = !window.isSecureContext && location.protocol === 'http:' && !isLocalHost && !isTryCloudflare;
 const isInsecurePublicTunnel = isTryCloudflare && location.protocol === 'http:';
 const lanOrigin = isInsecurePublicTunnel ? secureOrigin : location.origin;
+
+function aiPerQuestionSeconds() {
+  return 40;
+}
 
 if (isInsecurePublicTunnel) {
   window.location.replace(secureCurrentUrl);
@@ -147,6 +185,8 @@ nextSectionButton?.addEventListener('click', () => {
 });
 
 startProgrammingButton?.addEventListener('click', () => startSection('Programming'));
+startAiInterviewLauncher?.addEventListener('click', () => startAiInterview());
+startAiInterviewButton?.addEventListener('click', () => startAiInterview());
 
 submitInterviewButton?.addEventListener('click', () => showFinishNotice());
 
@@ -159,6 +199,29 @@ reviewLastQuestionButton?.addEventListener('click', () => {
 });
 
 confirmFinishButton?.addEventListener('click', () => submitInterview());
+repeatAiQuestionButton?.addEventListener('click', () => {
+  const question = aiInterviewQuestions[aiCurrentIndex];
+  if (!question) return;
+  isListeningToCandidate = false;
+  try { aiRecognition?.stop?.(); } catch (e) {}
+  const reply = `Certainly! Here is the question again: ${question}`;
+  if (aiSubtitle) aiSubtitle.innerText = reply;
+  setAiEmotion('speaking', 'Repeating Question...');
+  speakTextWithFallback(reply, () => {
+    if (aiSubtitle) aiSubtitle.innerText = question;
+    startCandidateListening();
+  });
+});
+saveAiAnswerButton?.addEventListener('click', () => saveCurrentAiAnswer());
+finishAiInterviewButton?.addEventListener('click', () => finishAiInterview());
+aiManualAnswer?.addEventListener('input', () => {
+  if (candidateSubtitle) {
+    candidateSubtitle.innerText = aiManualAnswer.value.trim() || 'Listening for your answer...';
+  }
+  if (saveAiAnswerButton) {
+    saveAiAnswerButton.disabled = !aiManualAnswer.value.trim();
+  }
+});
 
 document.querySelectorAll('textarea').forEach((textarea) => {
   textarea.addEventListener('focus', () => {
@@ -406,7 +469,11 @@ document.addEventListener('visibilitychange', () => {
 
 async function startSection(sectionName) {
   if (submitted) return;
-  if (sectionName === 'Programming' && !aptitudeCompleted) {
+  if (sectionName === 'Aptitude' && !enabledSections.Aptitude) {
+    showWarningPopup('Aptitude is disabled for this role.');
+    return;
+  }
+  if (sectionName === 'Programming' && (!enabledSections.Programming || (enabledSections.Aptitude && !aptitudeCompleted))) {
     showWarningPopup('Please complete Aptitude first, then continue to Programming.');
     return;
   }
@@ -424,8 +491,14 @@ async function startSection(sectionName) {
   if (programmingTransition) {
     programmingTransition.hidden = true;
   }
+  if (aiInterviewTransition) {
+    aiInterviewTransition.hidden = true;
+  }
+  if (aiInterviewPanel) {
+    aiInterviewPanel.hidden = true;
+  }
   nextSectionButton.hidden = true;
-  submitInterviewButton.hidden = sectionName !== 'Programming';
+  submitInterviewButton.hidden = !canSubmitFromWrittenSection(sectionName);
   if (questionFloatNav) {
     questionFloatNav.hidden = false;
   }
@@ -451,6 +524,26 @@ function isQuestionAnswered(question) {
 function isSectionAnswered(sectionName) {
   const sectionQuestions = window.QUESTIONS.filter((q) => q.category === sectionName);
   return sectionQuestions.length > 0 && sectionQuestions.every(isQuestionAnswered);
+}
+
+function hasEnabledWrittenSection(sectionName) {
+  return enabledSections[sectionName] && sectionQuestionTotal(sectionName) > 0;
+}
+
+function lastWrittenSection() {
+  if (hasEnabledWrittenSection('Programming')) return 'Programming';
+  if (hasEnabledWrittenSection('Aptitude')) return 'Aptitude';
+  return '';
+}
+
+function canSubmitFromWrittenSection(sectionName) {
+  return !enabledSections['AI Interview'] && sectionName === lastWrittenSection();
+}
+
+function nextAfterWrittenSection(sectionName) {
+  if (sectionName === 'Aptitude' && hasEnabledWrittenSection('Programming')) return 'Programming';
+  if (enabledSections['AI Interview']) return 'AI Interview';
+  return 'Submit';
 }
 
 function sectionAnsweredCount(sectionName) {
@@ -594,15 +687,20 @@ function updateQuestionNavigation() {
   }
   if (questionNextButton) {
     questionNextButton.disabled = !currentQuestion || !isQuestionAnswered(currentQuestion);
-    if (activeSection === 'Aptitude') {
-      questionNextButton.textContent = isLastQuestion ? 'Next Programming Session' : 'Next';
+    const nextSection = nextAfterWrittenSection(activeSection);
+    if (isLastQuestion && nextSection === 'Programming') {
+      questionNextButton.textContent = 'Next Programming Session';
+    } else if (isLastQuestion && nextSection === 'AI Interview') {
+      questionNextButton.textContent = 'Next AI HR Interview';
+    } else if (isLastQuestion) {
+      questionNextButton.textContent = 'Finish Test';
     } else {
-      questionNextButton.textContent = isLastQuestion ? 'Finish Test' : 'Next';
+      questionNextButton.textContent = 'Next';
     }
   }
   if (submitInterviewButton) {
-    submitInterviewButton.hidden = activeSection !== 'Programming' || !isLastQuestion;
-    submitInterviewButton.disabled = activeSection !== 'Programming' || !currentQuestion || !isQuestionAnswered(currentQuestion);
+    submitInterviewButton.hidden = !canSubmitFromWrittenSection(activeSection) || !isLastQuestion;
+    submitInterviewButton.disabled = !canSubmitFromWrittenSection(activeSection) || !currentQuestion || !isQuestionAnswered(currentQuestion);
   }
 }
 
@@ -638,10 +736,18 @@ function goToNextQuestion() {
     }
     return;
   }
-  if (activeSection === 'Aptitude') {
+  const nextSection = nextAfterWrittenSection(activeSection);
+  if (nextSection === 'Programming') {
     clearSkippedIfAnswered(currentQuestion);
     aptitudeCompleted = true;
     showProgrammingTransition();
+    return;
+  }
+  if (nextSection === 'AI Interview') {
+    clearSkippedIfAnswered(currentQuestion);
+    if (activeSection === 'Aptitude') aptitudeCompleted = true;
+    if (activeSection === 'Programming') programmingCompleted = true;
+    showAiInterviewTransition();
     return;
   }
   clearSkippedIfAnswered(currentQuestion);
@@ -689,6 +795,845 @@ function showProgrammingTransition() {
   updateTimerDisplay('Programming');
 }
 
+function showAiInterviewTransition() {
+  fetch('/api/progress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      section: 'Written test completed',
+      question_number: null,
+      question_text: 'Waiting to start AI HR Interview',
+    }),
+  }).catch(() => {});
+  activeSection = '';
+  clearInterval(timerInterval);
+  document.querySelectorAll('.test-section').forEach((item) => {
+    item.hidden = true;
+  });
+  sectionLauncher.hidden = true;
+  if (programmingTransition) programmingTransition.hidden = true;
+  if (aiInterviewTransition) aiInterviewTransition.hidden = false;
+  nextSectionButton.hidden = true;
+  submitInterviewButton.hidden = true;
+  if (questionFloatNav) questionFloatNav.hidden = true;
+  if (questionMapPanel) questionMapPanel.hidden = true;
+  timerSection.innerText = 'AI HR Interview ready';
+  progressSection.innerText = 'AI Interview';
+  answeredCountDisplay.innerText = '0';
+  sectionQuestionCount.innerText = aiInterviewQuestions.length;
+  updateTimerDisplay('AI Interview');
+}
+
+const aiEmotionBadge = document.getElementById('aiEmotionBadge');
+const voiceEqualizer = document.getElementById('voiceEqualizer');
+const aiEncouragingBanner = document.getElementById('aiEncouragingBanner');
+const candidateName = window.CANDIDATE_NAME || 'candidate';
+let aiHesitationTimer;
+
+function setAiEmotion(state, label) {
+  if (aiEmotionBadge) {
+    aiEmotionBadge.innerText = label;
+    aiEmotionBadge.className = `emotion-badge ${state}`;
+  }
+  if (voiceEqualizer) {
+    if (state === 'speaking') {
+      voiceEqualizer.classList.add('active');
+    } else {
+      voiceEqualizer.classList.remove('active');
+    }
+  }
+}
+
+function showEncouragingBanner(show) {
+  if (aiEncouragingBanner) {
+    aiEncouragingBanner.hidden = !show;
+  }
+}
+
+aiManualAnswer?.addEventListener('input', () => {
+  showEncouragingBanner(false);
+  setAiEmotion('listening', 'Listening Attentively...');
+  const val = (aiManualAnswer.value || '').trim();
+  if (candidateSubtitle) candidateSubtitle.innerText = val || 'Listening for your answer...';
+  if (saveAiAnswerButton) saveAiAnswerButton.disabled = !val;
+});
+
+async function startAiInterview() {
+  if (submitted || aiInterviewStarted || !enabledSections['AI Interview']) return;
+  if (enabledSections.Aptitude && !aptitudeCompleted) {
+    showWarningPopup('Please complete Aptitude before Round 3: AI HR Interview.');
+    return;
+  }
+  if (enabledSections.Programming && !programmingCompleted) {
+    showWarningPopup('Please complete Programming before Round 3: AI HR Interview.');
+    return;
+  }
+  if (!(await showProctoringNotice())) return;
+  if (!(await ensureCameraReady())) return;
+  armProctoring();
+  await startAiAudioRecording();
+  requestFullscreenMode();
+  startTotalTestTimer();
+  aiInterviewStarted = true;
+  activeSection = 'AI Interview';
+  aiInterviewStartedAt = new Date().toISOString();
+  sectionLauncher.hidden = true;
+  if (programmingTransition) programmingTransition.hidden = true;
+  if (aiInterviewTransition) aiInterviewTransition.hidden = true;
+  if (aiInterviewPanel) aiInterviewPanel.hidden = false;
+  if (questionFloatNav) questionFloatNav.hidden = true;
+  if (questionMapPanel) questionMapPanel.hidden = true;
+  timerSection.innerText = 'Round 3: AI HR Interview';
+  updateTimerDisplay('AI Interview');
+  startSectionTimer();
+  playAiIntroSpeech();
+}
+
+let aiSupervisorInterval = null;
+let candidateTranscript = '';
+let candidateQuestionCheckTimer = null;
+let lastProcessedQuestionText = '';
+
+function escapeHtml(text) {
+  return (text || '')
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+let candidateAudioContext = null;
+let candidateAnalyser = null;
+let candidateGainNode = null;
+let candidateAnimFrame = null;
+
+function initCandidateAudioVisualizer(stream) {
+  if (!stream || candidateAudioContext) return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    candidateAudioContext = new AudioCtx();
+    const source = candidateAudioContext.createMediaStreamSource(stream);
+
+    // High-pass filter to eliminate low Bluetooth/AirPods proximity rumble
+    const highpass = candidateAudioContext.createBiquadFilter();
+    highpass.type = 'highpass';
+    highpass.frequency.setValueAtTime(80, candidateAudioContext.currentTime);
+
+    // Dynamic Range Compressor to equalize soft / quiet candidate speech
+    const compressor = candidateAudioContext.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-50, candidateAudioContext.currentTime);
+    compressor.knee.setValueAtTime(40, candidateAudioContext.currentTime);
+    compressor.ratio.setValueAtTime(12, candidateAudioContext.currentTime);
+    compressor.attack.setValueAtTime(0, candidateAudioContext.currentTime);
+    compressor.release.setValueAtTime(0.25, candidateAudioContext.currentTime);
+
+    // 8.0x Gain sensitivity boost for AirPods / Bluetooth microphone input
+    candidateGainNode = candidateAudioContext.createGain();
+    candidateGainNode.gain.value = 8.0;
+
+    candidateAnalyser = candidateAudioContext.createAnalyser();
+    candidateAnalyser.fftSize = 64;
+
+    source.connect(highpass);
+    highpass.connect(compressor);
+    compressor.connect(candidateGainNode);
+    candidateGainNode.connect(candidateAnalyser);
+
+    const eqEl = document.getElementById('candidateVoiceEqualizer');
+    const bars = eqEl ? eqEl.querySelectorAll('.bar') : [];
+    const dataArray = new Uint8Array(candidateAnalyser.frequencyBinCount);
+
+    let quietCount = 0;
+
+    function renderEqualizer() {
+      if (candidateAudioContext && candidateAudioContext.state === 'suspended') {
+        candidateAudioContext.resume().catch(() => {});
+      }
+
+      if (!isListeningToCandidate || aiInterviewCompleted) {
+        bars.forEach((b) => { b.style.height = '4px'; });
+        if (eqEl) eqEl.classList.remove('active');
+        candidateAnimFrame = requestAnimationFrame(renderEqualizer);
+        return;
+      }
+
+      candidateAnalyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i += 1) {
+        sum += dataArray[i];
+      }
+      const avg = sum / dataArray.length;
+
+      if (avg >= 1 && avg <= 6) {
+        quietCount += 1;
+        if (quietCount > 500) {
+          quietCount = 0;
+          speakVolumePrompt();
+        }
+      } else {
+        quietCount = 0;
+      }
+
+      if (avg > 1) {
+        if (eqEl) eqEl.classList.add('active');
+        bars.forEach((bar, idx) => {
+          const sampleIdx = Math.floor((idx / bars.length) * dataArray.length);
+          const val = dataArray[sampleIdx] || avg;
+          const dynamicFactor = Math.sin(Date.now() / 150 + idx) * 3 + 2;
+          const h = Math.min(Math.max(Math.round((val / 128) * 16 + dynamicFactor), 5), 16);
+          bar.style.height = `${h}px`;
+        });
+      } else {
+        if (eqEl) eqEl.classList.remove('active');
+        bars.forEach((b) => { b.style.height = '4px'; });
+      }
+
+      candidateAnimFrame = requestAnimationFrame(renderEqualizer);
+    }
+
+    renderEqualizer();
+  } catch (e) {}
+}
+
+function speakVolumePrompt() {
+  const promptText = "Could you please speak a little louder so I can capture your answer clearly?";
+  showEncouragingBanner(true);
+  setAiEmotion('encouraging', 'Volume Check — Speak Louder');
+  const currentQuestionText = aiInterviewQuestions[aiCurrentIndex] || '';
+
+  isListeningToCandidate = false;
+  try { aiRecognition?.stop?.(); } catch (e) {}
+
+  speakTextWithWordHighlight(promptText, () => {
+    if (aiSubtitle) aiSubtitle.innerText = currentQuestionText;
+    startCandidateListening();
+  });
+}
+
+function evaluateVoiceCommands(rawText) {
+  const lower = (rawText || '').toLowerCase().trim();
+  if (!lower || !isListeningToCandidate || aiInterviewCompleted) return false;
+
+  // Voice Command 1: Next Question
+  if (/\b(next question|move next|save and next|go to next|next)\b/i.test(lower)) {
+    saveCurrentAiAnswer();
+    return true;
+  }
+
+  // Voice Command 2: Repeat Question
+  if (/\b(repeat question|repeat the question|say again|pardon|repeat)\b/i.test(lower)) {
+    const question = aiInterviewQuestions[aiCurrentIndex];
+    if (!question) return true;
+    isListeningToCandidate = false;
+    try { aiRecognition?.stop?.(); } catch (e) {}
+    const reply = `Certainly! Here is the question again: ${question}`;
+    setAiEmotion('speaking', 'Repeating Question...');
+    speakTextWithWordHighlight(reply, () => {
+      if (aiSubtitle) aiSubtitle.innerText = question;
+      startCandidateListening();
+    });
+    return true;
+  }
+
+  return false;
+}
+
+let aiSTTLoopTimer = null;
+
+function sendAudioChunkForSTT() {
+  if (!isListeningToCandidate || aiInterviewCompleted || !aiAudioStream) return;
+
+  let recorder;
+  try {
+    const preferredType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
+
+    recorder = preferredType ? new MediaRecorder(aiAudioStream, { mimeType: preferredType }) : new MediaRecorder(aiAudioStream);
+  } catch (e) {
+    return;
+  }
+
+  const chunks = [];
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
+  };
+
+  recorder.onstop = async () => {
+    if (chunks.length === 0 || !isListeningToCandidate || aiInterviewCompleted) return;
+    const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+    if (blob.size < 300) return;
+
+    const formData = new FormData();
+    formData.append('audio', blob, 'chunk.webm');
+    try {
+      const res = await fetch('/api/transcribe-audio', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.text && data.text.trim()) {
+        const newText = data.text.trim();
+        showEncouragingBanner(false);
+        setAiEmotion('listening', 'Listening Attentively...');
+
+        if (evaluateVoiceCommands(newText)) return;
+
+        let currentVal = (aiManualAnswer?.value || '').trim();
+        const words = newText.split(/\s+/);
+        const missingWords = words.filter((w) => w.length > 1 && !currentVal.toLowerCase().includes(w.toLowerCase()));
+        if (missingWords.length > 0) {
+          const appendText = missingWords.join(' ');
+          currentVal = currentVal ? `${currentVal} ${appendText}` : newText;
+          if (aiManualAnswer) {
+            aiManualAnswer.value = currentVal;
+            aiManualAnswer.scrollTop = aiManualAnswer.scrollHeight;
+          }
+          if (candidateSubtitle) {
+            candidateSubtitle.innerText = currentVal;
+          }
+          if (saveAiAnswerButton) {
+            saveAiAnswerButton.disabled = false;
+          }
+          checkAndAnswerCandidateQuestion(currentVal);
+        }
+      }
+    } catch (err) {}
+  };
+
+  recorder.start();
+  setTimeout(() => {
+    if (recorder.state === 'recording') {
+      try { recorder.stop(); } catch (e) {}
+    }
+  }, 2200);
+}
+
+function startContinuousAudioTranscribe() {
+  stopContinuousAudioTranscribe();
+  aiSTTLoopTimer = setInterval(() => {
+    if (isListeningToCandidate && !aiInterviewCompleted) {
+      sendAudioChunkForSTT();
+    }
+  }, 2500);
+}
+
+function stopContinuousAudioTranscribe() {
+  if (aiSTTLoopTimer) {
+    clearInterval(aiSTTLoopTimer);
+    aiSTTLoopTimer = null;
+  }
+}
+
+function speakTextWithWordHighlight(text, onEnd) {
+  window.speechSynthesis?.cancel();
+  let called = false;
+  const safeDone = () => {
+    if (called) return;
+    called = true;
+    clearTimeout(fallbackTimer);
+    onEnd?.();
+  };
+
+  if (aiSubtitle) {
+    const rawWords = text.split(/(\s+)/);
+    let html = '';
+    let currOffset = 0;
+    rawWords.forEach((token) => {
+      if (token.trim()) {
+        html += `<span class="word-span" data-start="${currOffset}" data-end="${currOffset + token.length}">${escapeHtml(token)}</span>`;
+      } else {
+        html += token;
+      }
+      currOffset += token.length;
+    });
+    aiSubtitle.innerHTML = html;
+  }
+
+  const estimatedMs = Math.max(Math.round(text.length * 90) + 1800, 3000);
+  const fallbackTimer = setTimeout(safeDone, estimatedMs);
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'en-IN';
+  utterance.rate = 0.88;
+  utterance.pitch = 1.02;
+  utterance.onend = safeDone;
+  utterance.onerror = safeDone;
+
+  utterance.onboundary = (event) => {
+    if (event.name === 'word' && aiSubtitle) {
+      const charIdx = event.charIndex;
+      const spans = aiSubtitle.querySelectorAll('.word-span');
+      spans.forEach((span) => {
+        const start = parseInt(span.getAttribute('data-start') || '0', 10);
+        const end = parseInt(span.getAttribute('data-end') || '0', 10);
+        if (charIdx >= start && charIdx < end) {
+          span.classList.add('word-highlight');
+        } else {
+          span.classList.remove('word-highlight');
+        }
+      });
+    }
+  };
+
+function prepareBluetoothAudioRouting() {
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'WITTMANN AI Interviewer',
+        artist: 'AI Interviewer Bot',
+        album: 'Round 3: AI Interview',
+      });
+      navigator.mediaSession.setActionHandler('play', () => {});
+      navigator.mediaSession.setActionHandler('pause', () => {});
+    } catch (e) {}
+  }
+  if (window.speechSynthesis) {
+    try {
+      window.speechSynthesis.resume();
+    } catch (e) {}
+  }
+}
+
+  prepareBluetoothAudioRouting();
+  if (window.speechSynthesis) {
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.resume();
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      safeDone();
+    }
+  } else {
+    safeDone();
+  }
+}
+
+function startSpeechSupervisor() {
+  if (aiSupervisorInterval) return;
+  aiSupervisorInterval = setInterval(() => {
+    if (isListeningToCandidate && !aiInterviewCompleted && activeSection === 'AI Interview') {
+      try {
+        aiRecognition?.start?.();
+      } catch (e) {
+        // Recognition active
+      }
+    }
+  }, 1200);
+}
+
+function stopSpeechSupervisor() {
+  if (aiSupervisorInterval) {
+    clearInterval(aiSupervisorInterval);
+    aiSupervisorInterval = null;
+  }
+}
+
+function playAiIntroSpeech() {
+  const introText = `Hello ${candidateName}, welcome to Round 3 of your interview! I am your WITTMANN AI Interviewer. Please relax, feel comfortable, and share your experiences naturally. If you ever need a moment or have any questions, feel free to ask me anytime. Ready? Let's get started with your first question!`;
+  if (aiInterviewStatus) aiInterviewStatus.innerText = 'AI Interview Introduction';
+  if (candidateSubtitle) candidateSubtitle.innerText = 'Please listen to the AI Interviewer introduction...';
+  setAiEmotion('speaking', 'Speaking Introduction...');
+  showEncouragingBanner(false);
+
+  speakTextWithWordHighlight(introText, () => {
+    setAiEmotion('warm', 'Attentive & Professional');
+    askAiQuestion();
+  });
+}
+
+function checkAndAnswerCandidateQuestion(transcriptText) {
+  const clean = (transcriptText || '').trim();
+  if (!clean || clean === lastProcessedQuestionText || clean.length < 3) return;
+
+  if (evaluateVoiceCommands(clean)) return;
+
+  const lower = clean.toLowerCase();
+  const questionTriggers = ['repeat', 'say again', 'pardon', 'didn\'t hear', 'what do you mean', 'explain', 'clarify', 'what is', 'can you', 'could you', 'how do'];
+  const isQuestion = lower.endsWith('?') || questionTriggers.some((w) => lower.includes(w));
+
+  if (!isQuestion) return;
+  lastProcessedQuestionText = clean;
+
+  const currentQuestionText = aiInterviewQuestions[aiCurrentIndex] || '';
+  fetch('/api/ai-hr-reply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      candidate_text: clean,
+      current_question: currentQuestionText,
+    }),
+  })
+  .then((res) => res.json())
+  .then((data) => {
+    if (!data.reply) return;
+    isListeningToCandidate = false;
+    try { aiRecognition?.stop?.(); } catch (e) {}
+
+    const originalQuestion = currentQuestionText;
+    setAiEmotion('speaking', 'Answering Candidate...');
+
+    speakTextWithWordHighlight(data.reply, () => {
+      if (aiSubtitle) aiSubtitle.innerText = originalQuestion;
+      startCandidateListening();
+    });
+  })
+  .catch(() => {});
+}
+
+function speakEncouragement() {
+  const reassureText = "Don't panic — take a deep breath and feel free to answer in your own words.";
+  showEncouragingBanner(true);
+  setAiEmotion('encouraging', 'Empathetic Guide');
+  const currentQuestionText = aiInterviewQuestions[aiCurrentIndex] || '';
+
+  isListeningToCandidate = false;
+  try { aiRecognition?.stop?.(); } catch (e) {}
+
+  speakTextWithWordHighlight(reassureText, () => {
+    if (aiSubtitle) aiSubtitle.innerText = currentQuestionText;
+    startCandidateListening();
+  });
+}
+
+async function startAiAudioRecording() {
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder || aiMediaRecorder) return;
+  try {
+    const audioConstraints = {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    };
+    aiAudioStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+    initCandidateAudioVisualizer(aiAudioStream);
+    const preferredType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    aiMediaRecorder = preferredType
+      ? new MediaRecorder(aiAudioStream, { mimeType: preferredType })
+      : new MediaRecorder(aiAudioStream);
+    aiAudioChunks = [];
+    aiMediaRecorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        aiAudioChunks.push(event.data);
+      }
+    };
+    aiMediaRecorder.start(1000);
+  } catch (error) {
+    showWarningPopup('Microphone recording could not start. The AI transcript will still be saved.');
+  }
+}
+
+function stopAiAudioRecording() {
+  if (aiAudioSaved) return Promise.resolve();
+  if (!aiMediaRecorder || aiMediaRecorder.state === 'inactive') {
+    aiAudioStream?.getTracks?.().forEach((track) => track.stop());
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    aiMediaRecorder.onstop = async () => {
+      try {
+        aiAudioStream?.getTracks?.().forEach((track) => track.stop());
+        const blob = new Blob(aiAudioChunks, { type: aiMediaRecorder.mimeType || 'audio/webm' });
+        if (blob.size > 0) {
+          const formData = new FormData();
+          formData.append('audio', blob, 'ai-hr-interview.webm');
+          await fetch('/api/ai-interview-audio', {
+            method: 'POST',
+            body: formData,
+          });
+          aiAudioSaved = true;
+        }
+      } catch (error) {
+        showWarningPopup('AI audio recording could not be uploaded. The transcript report will still be saved.');
+      }
+      resolve();
+    };
+    aiMediaRecorder.stop();
+  });
+}
+
+function speakCurrentAiQuestion() {
+  const question = aiInterviewQuestions[aiCurrentIndex];
+  if (!question) return;
+  isListeningToCandidate = false;
+  try { aiRecognition?.stop?.(); } catch (e) {}
+  showEncouragingBanner(false);
+  setAiEmotion('speaking', 'Speaking Question...');
+  aiCurrentTurn.ai_started_at = aiCurrentTurn.ai_started_at || new Date().toISOString();
+
+  speakTextWithWordHighlight(question, () => {
+    aiCurrentTurn.ai_finished_at = new Date().toISOString();
+    startCandidateListening();
+  });
+}
+
+function askAiQuestion() {
+  clearTimeout(aiAnswerTimer);
+  clearInterval(aiAnswerStatusTimer);
+  clearTimeout(aiHesitationTimer);
+  clearTimeout(candidateQuestionCheckTimer);
+  showEncouragingBanner(false);
+
+  const question = aiInterviewQuestions[aiCurrentIndex];
+  if (!question) {
+    finishAiInterview();
+    return;
+  }
+
+  candidateTranscript = '';
+  lastProcessedQuestionText = '';
+  aiCurrentTurn = {
+    question_number: aiCurrentIndex + 1,
+    question_text: question,
+    ai_started_at: '',
+    ai_finished_at: '',
+    candidate_started_at: '',
+    candidate_finished_at: '',
+    candidate_answer: '',
+    answer_seconds: 0,
+    timed_out: false,
+  };
+
+  if (aiInterviewStatus) aiInterviewStatus.innerText = `Question ${aiCurrentIndex + 1} of ${aiInterviewQuestions.length}`;
+  if (aiQuestionCounter) aiQuestionCounter.innerText = `${aiCurrentIndex + 1}/${aiInterviewQuestions.length} questions`;
+  if (candidateSubtitle) candidateSubtitle.innerText = 'Please listen to the question.';
+  if (aiManualAnswer) aiManualAnswer.value = '';
+  if (saveAiAnswerButton) saveAiAnswerButton.disabled = true;
+
+  fetch('/api/progress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      section: 'AI Interview',
+      question_number: aiCurrentIndex + 1,
+      question_text: question,
+    }),
+  }).catch(() => {});
+
+  speakCurrentAiQuestion();
+}
+
+function startCandidateListening() {
+  if (!aiCurrentTurn) return;
+  isListeningToCandidate = true;
+  if (candidateAudioContext && candidateAudioContext.state === 'suspended') {
+    try { candidateAudioContext.resume(); } catch (e) {}
+  }
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  aiCurrentTurn.candidate_started_at = aiCurrentTurn.candidate_started_at || new Date().toISOString();
+  
+  const currentVal = (aiManualAnswer?.value || '').trim();
+  if (candidateSubtitle) candidateSubtitle.innerText = currentVal || 'Listening for your answer...';
+  if (aiInterviewStatus) aiInterviewStatus.innerText = `Question ${aiCurrentIndex + 1} - Listening`;
+  setAiEmotion('listening', 'Listening Attentively...');
+  showEncouragingBanner(false);
+
+  startAiAnswerTimer();
+  startSpeechSupervisor();
+  startContinuousAudioTranscribe();
+
+  clearTimeout(aiHesitationTimer);
+  aiHesitationTimer = setTimeout(() => {
+    if (isListeningToCandidate && !aiCurrentTurn.candidate_answer && !(aiManualAnswer?.value || '').trim()) {
+      speakEncouragement();
+    }
+  }, 15000);
+
+  if (!SpeechRecognition) {
+    aiManualAnswer?.focus();
+    return;
+  }
+
+  try { aiRecognition?.stop?.(); } catch (e) {}
+
+  aiRecognition = new SpeechRecognition();
+  aiRecognition.lang = 'en-IN';
+  aiRecognition.continuous = true;
+  aiRecognition.interimResults = true;
+
+  aiRecognition.onresult = (event) => {
+    showEncouragingBanner(false);
+    setAiEmotion('listening', 'Listening Attentively...');
+    let interim = '';
+    let currentFinal = (aiManualAnswer?.value || '').trim();
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const text = event.results[index][0].transcript;
+      if (event.results[index].isFinal) {
+        const trimmed = text.trim();
+        if (trimmed && !currentFinal.toLowerCase().includes(trimmed.toLowerCase())) {
+          currentFinal = currentFinal ? `${currentFinal} ${trimmed}` : trimmed;
+        }
+      } else {
+        interim = `${interim} ${text}`.trim();
+      }
+    }
+    const combined = `${currentFinal} ${interim}`.trim();
+    if (evaluateVoiceCommands(combined)) return;
+
+    if (aiManualAnswer) {
+      aiManualAnswer.value = combined;
+      aiManualAnswer.scrollTop = aiManualAnswer.scrollHeight;
+    }
+    if (candidateSubtitle) {
+      candidateSubtitle.innerText = combined || 'Listening for your answer...';
+    }
+    if (saveAiAnswerButton) {
+      saveAiAnswerButton.disabled = !combined;
+    }
+
+    clearTimeout(candidateQuestionCheckTimer);
+    candidateQuestionCheckTimer = setTimeout(() => {
+      checkAndAnswerCandidateQuestion(combined);
+    }, 1800);
+  };
+
+  aiRecognition.onerror = () => {
+    showEncouragingBanner(false);
+    if (saveAiAnswerButton) saveAiAnswerButton.disabled = !(aiManualAnswer?.value || '').trim();
+  };
+
+  aiRecognition.onend = () => {
+    if (isListeningToCandidate && !aiInterviewCompleted) {
+      try {
+        aiRecognition.start();
+      } catch (e) {}
+    }
+  };
+
+  try {
+    aiRecognition.start();
+  } catch (e) {}
+}
+
+function startAiAnswerTimer() {
+  clearTimeout(aiAnswerTimer);
+  clearInterval(aiAnswerStatusTimer);
+  const limit = aiPerQuestionSeconds();
+  const started = Date.now();
+  const updateStatus = () => {
+    const elapsed = Math.floor((Date.now() - started) / 1000);
+    const remaining = Math.max(limit - elapsed, 0);
+    if (aiInterviewStatus) {
+      aiInterviewStatus.innerText = `Question ${aiCurrentIndex + 1} - Listening (${remaining}s left)`;
+    }
+  };
+  updateStatus();
+  aiAnswerStatusTimer = setInterval(updateStatus, 1000);
+  aiAnswerTimer = setTimeout(() => {
+    showWarningPopup('Answer time ended. Moving to the next AI HR question.');
+    saveCurrentAiAnswer({ allowBlank: true, timedOut: true });
+  }, limit * 1000);
+}
+
+function speakTransitionAndAskNext() {
+  const transitions = [
+    "Thank you! Let's move on to your next question.",
+    "Thank you for sharing that answer. Here is your next question.",
+    "Good response. Let's continue to your next question.",
+  ];
+  const transitionText = transitions[aiCurrentIndex % transitions.length];
+  if (candidateSubtitle) candidateSubtitle.innerText = 'Please listen to the AI HR Interviewer...';
+  setAiEmotion('speaking', 'Human Transition...');
+
+  speakTextWithWordHighlight(transitionText, () => {
+    askAiQuestion();
+  });
+}
+
+function saveCurrentAiAnswer(options = {}) {
+  if (!aiCurrentTurn) return;
+  isListeningToCandidate = false;
+  stopSpeechSupervisor();
+  stopContinuousAudioTranscribe();
+  const answer = (aiManualAnswer?.value || '').trim();
+  if (!answer && !options.allowBlank) {
+    showWarningPopup('Please answer before saving, or wait for the timer to move forward.');
+    return;
+  }
+  clearTimeout(aiAnswerTimer);
+  clearInterval(aiAnswerStatusTimer);
+  clearTimeout(aiHesitationTimer);
+  showEncouragingBanner(false);
+  setAiEmotion('warm', 'Attentive & Professional');
+  try { aiRecognition?.stop?.(); } catch (e) {}
+  aiCurrentTurn.candidate_finished_at = new Date().toISOString();
+  aiCurrentTurn.candidate_answer = answer;
+  aiCurrentTurn.timed_out = Boolean(options.timedOut);
+  const started = Date.parse(aiCurrentTurn.candidate_started_at || '');
+  const finished = Date.parse(aiCurrentTurn.candidate_finished_at || '');
+  aiCurrentTurn.answer_seconds = Number.isFinite(started) && Number.isFinite(finished)
+    ? Math.max(Math.round((finished - started) / 1000), 0)
+    : 0;
+  aiTranscript.push(aiCurrentTurn);
+  answeredCountDisplay.innerText = String(aiTranscript.length);
+
+  const maxQuestions = Math.min(aiInterviewQuestions.length || 15, 15);
+  if (aiCurrentIndex >= maxQuestions - 1) {
+    aiInterviewCompleted = true;
+    if (aiInterviewStatus) aiInterviewStatus.innerText = 'All 15 questions completed';
+    if (finishAiInterviewButton) finishAiInterviewButton.hidden = false;
+    if (saveAiAnswerButton) saveAiAnswerButton.disabled = true;
+    finishAiInterview();
+    return;
+  }
+  aiCurrentIndex += 1;
+  speakTransitionAndAskNext();
+}
+
+async function saveAiInterviewReport(autoSubmitReason = '') {
+  if (!enabledSections['AI Interview'] || !aiTranscript.length || aiReportSaved) return;
+  await fetch('/api/ai-interview-report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      started_at: aiInterviewStartedAt,
+      completed_at: new Date().toISOString(),
+      auto_submit_reason: autoSubmitReason,
+      turns: aiTranscript,
+    }),
+  }).then(() => {
+    aiReportSaved = true;
+  }).catch(() => {});
+}
+
+async function finishAiInterview() {
+  if (submitted) return;
+  isListeningToCandidate = false;
+  stopSpeechSupervisor();
+  clearTimeout(aiAnswerTimer);
+  clearInterval(aiAnswerStatusTimer);
+  if (aiCurrentTurn && !aiTranscript.includes(aiCurrentTurn)) {
+    const answer = (aiManualAnswer?.value || '').trim();
+    if (answer) {
+      aiCurrentTurn.candidate_finished_at = new Date().toISOString();
+      aiCurrentTurn.candidate_answer = answer;
+      const started = Date.parse(aiCurrentTurn.candidate_started_at || '');
+      const finished = Date.parse(aiCurrentTurn.candidate_finished_at || '');
+      aiCurrentTurn.answer_seconds = Number.isFinite(started) && Number.isFinite(finished)
+        ? Math.max(Math.round((finished - started) / 1000), 0)
+        : 0;
+      aiTranscript.push(aiCurrentTurn);
+    }
+  }
+  aiInterviewCompleted = true;
+
+  const closingText = `Thank you so much, ${candidateName}. You have completed Round 3 of your interview. Your responses have been saved successfully. Have a wonderful day!`;
+  if (aiSubtitle) aiSubtitle.innerText = closingText;
+  if (candidateSubtitle) candidateSubtitle.innerText = 'Interview completed. Submitting results...';
+  setAiEmotion('speaking', 'Interview Completed');
+
+  await new Promise((resolve) => {
+    speakTextWithWordHighlight(closingText, resolve);
+  });
+
+  await stopAiAudioRecording();
+  await saveAiInterviewReport();
+  submitInterview();
+}
+
 function showSectionLauncher() {
   document.querySelectorAll('.test-section').forEach((item) => {
     item.hidden = true;
@@ -709,6 +1654,14 @@ function showSectionLauncher() {
     if (button) {
       button.disabled = false;
       button.textContent = 'Start Programming';
+    }
+  }
+  if (aiInterviewLauncher && (!enabledSections.Aptitude || aptitudeCompleted) && (!enabledSections.Programming || programmingCompleted)) {
+    aiInterviewLauncher.classList.remove('locked');
+    const button = aiInterviewLauncher.querySelector('button');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Start AI Interview';
     }
   }
 }
@@ -740,8 +1693,23 @@ function startSectionTimer() {
         nextSectionButton.hidden = true;
         submitInterviewButton.hidden = true;
         timerSection.innerText = 'Aptitude completed';
-        showProgrammingTransition();
-        showWarningPopup('Aptitude time ended. Please start Programming.');
+        if (hasEnabledWrittenSection('Programming')) {
+          showProgrammingTransition();
+          showWarningPopup('Aptitude time ended. Please start Programming.');
+        } else if (enabledSections['AI Interview']) {
+          showAiInterviewTransition();
+          showWarningPopup('Aptitude time ended. Please start the AI HR Interview.');
+        } else {
+          submitInterview('Aptitude time limit ended. Test auto submitted.');
+        }
+      } else if (activeSection === 'Programming' && enabledSections['AI Interview']) {
+        programmingCompleted = true;
+        activeSection = '';
+        clearInterval(timerInterval);
+        showAiInterviewTransition();
+        showWarningPopup('Programming time ended. Please start the AI HR Interview.');
+      } else if (activeSection === 'AI Interview') {
+        finishAiInterview();
       } else {
         submitInterview(`${activeSection} time limit ended. Test auto submitted.`);
       }
@@ -763,7 +1731,9 @@ function startTotalTestTimer() {
 }
 
 function updateTimerDisplay(sectionName = activeSection) {
-  const fallbackSection = aptitudeCompleted ? 'Programming' : 'Aptitude';
+  const fallbackSection = enabledSections.Aptitude && !aptitudeCompleted
+    ? 'Aptitude'
+    : (enabledSections.Programming && !programmingCompleted ? 'Programming' : 'AI Interview');
   const displaySection = sectionName || fallbackSection;
   const remaining = Math.max(sectionRemaining[displaySection] ?? DEFAULT_SECTION_SECONDS, 0);
   const minutes = String(Math.floor(remaining / 60)).padStart(2, '0');
@@ -772,7 +1742,7 @@ function updateTimerDisplay(sectionName = activeSection) {
 }
 
 function updateAnsweredCount() {
-  const sectionName = activeSection || (aptitudeCompleted ? 'Programming' : 'Aptitude');
+  const sectionName = activeSection || (enabledSections.Aptitude && !aptitudeCompleted ? 'Aptitude' : (enabledSections.Programming ? 'Programming' : 'AI Interview'));
   if (activeSection) {
     const currentQuestion = getCurrentQuestion();
     clearSkippedIfAnswered(currentQuestion);
@@ -787,8 +1757,13 @@ function updateAnsweredCount() {
 }
 
 function showFinishNotice() {
-  if (!isSectionAnswered('Programming')) {
-    showWarningPopup('Please answer all Programming questions before submitting.');
+  const finalSection = lastWrittenSection();
+  if (finalSection && !isSectionAnswered(finalSection)) {
+    showWarningPopup(`Please answer all ${finalSection} questions before submitting.`);
+    return;
+  }
+  if (enabledSections['AI Interview'] && !aiInterviewCompleted) {
+    showAiInterviewTransition();
     return;
   }
   if (finishNotice) {
@@ -850,6 +1825,25 @@ function collectTableAnswer(questionId) {
 async function submitInterview(autoSubmitReason = '') {
   if (submitted) return;
   submitted = true;
+  clearTimeout(aiAnswerTimer);
+  clearInterval(aiAnswerStatusTimer);
+  if (aiCurrentTurn && !aiTranscript.includes(aiCurrentTurn)) {
+    const answer = (aiManualAnswer?.value || '').trim();
+    aiCurrentTurn.candidate_finished_at = new Date().toISOString();
+    aiCurrentTurn.candidate_answer = answer;
+    aiCurrentTurn.timed_out = Boolean(autoSubmitReason);
+    const started = Date.parse(aiCurrentTurn.candidate_started_at || '');
+    const finished = Date.parse(aiCurrentTurn.candidate_finished_at || '');
+    aiCurrentTurn.answer_seconds = Number.isFinite(started) && Number.isFinite(finished)
+      ? Math.max(Math.round((finished - started) / 1000), 0)
+      : 0;
+    if (answer || activeSection === 'AI Interview') {
+      aiTranscript.push(aiCurrentTurn);
+    }
+  }
+  aiRecognition?.stop?.();
+  await stopAiAudioRecording();
+  await saveAiInterviewReport(autoSubmitReason);
   clearTimeout(progressTimer);
   clearInterval(timerInterval);
   clearInterval(totalTimerInterval);

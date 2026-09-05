@@ -255,8 +255,14 @@ def init_db():
         ensure_column(conn, "users", "candidate_degree", "TEXT")
         ensure_column(conn, "roles", "allowed_degrees", "TEXT")
         ensure_column(conn, "roles", "allowed_question_sets", "TEXT")
+        ensure_column(conn, "roles", "aptitude_enabled", "BOOLEAN DEFAULT TRUE")
+        ensure_column(conn, "roles", "programming_enabled", "BOOLEAN DEFAULT TRUE")
+        ensure_column(conn, "roles", "ai_interview_enabled", "BOOLEAN DEFAULT TRUE")
+        conn.execute("UPDATE roles SET ai_interview_enabled = TRUE WHERE ai_interview_enabled IS NULL")
         ensure_column(conn, "roles", "aptitude_minutes", "INTEGER DEFAULT 20")
         ensure_column(conn, "roles", "programming_minutes", "INTEGER DEFAULT 20")
+        ensure_column(conn, "roles", "ai_interview_minutes", "INTEGER DEFAULT 25")
+        ensure_column(conn, "roles", "ai_interview_max_questions", "INTEGER DEFAULT 15")
         ensure_column(conn, "roles", "total_paper_marks", "REAL DEFAULT 0")
         ensure_column(conn, "roles", "shortlist_min_marks", "REAL DEFAULT 0")
         ensure_column(conn, "roles", "deleted_at", "TIMESTAMPTZ")
@@ -265,6 +271,8 @@ def init_db():
         ensure_column(conn, "interviews", "shortlist_status", "TEXT")
         ensure_column(conn, "interviews", "shortlist_reason", "TEXT")
         ensure_column(conn, "interviews", "reviewer_note", "TEXT")
+        ensure_column(conn, "interviews", "ai_interview_report_path", "TEXT")
+        ensure_column(conn, "interviews", "ai_interview_audio_path", "TEXT")
         ensure_column(conn, "interviews", "interview_started_at", "TIMESTAMPTZ")
         ensure_column(conn, "interviews", "interview_completed_at", "TIMESTAMPTZ")
         ensure_column(conn, "interviews", "last_activity_at", "TIMESTAMPTZ")
@@ -272,6 +280,23 @@ def init_db():
         ensure_column(conn, "interviews", "current_question_number", "INTEGER")
         ensure_column(conn, "interviews", "current_question_text", "TEXT")
         ensure_proctoring_settings_table(conn)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_interview_turns (
+                turn_id SERIAL PRIMARY KEY,
+                interview_id TEXT NOT NULL REFERENCES interviews(interview_id) ON DELETE CASCADE,
+                question_number INTEGER NOT NULL,
+                question_text TEXT NOT NULL,
+                ai_started_at TEXT,
+                ai_finished_at TEXT,
+                candidate_started_at TEXT,
+                candidate_finished_at TEXT,
+                candidate_answer TEXT,
+                answer_seconds REAL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
         for slug, name in ROLES:
             conn.execute(
                 """
@@ -386,16 +411,26 @@ def list_roles():
     with get_db() as conn:
         ensure_column(conn, "roles", "allowed_degrees", "TEXT")
         ensure_column(conn, "roles", "allowed_question_sets", "TEXT")
+        ensure_column(conn, "roles", "aptitude_enabled", "BOOLEAN DEFAULT TRUE")
+        ensure_column(conn, "roles", "programming_enabled", "BOOLEAN DEFAULT TRUE")
+        ensure_column(conn, "roles", "ai_interview_enabled", "BOOLEAN DEFAULT FALSE")
         ensure_column(conn, "roles", "aptitude_minutes", "INTEGER DEFAULT 20")
         ensure_column(conn, "roles", "programming_minutes", "INTEGER DEFAULT 20")
+        ensure_column(conn, "roles", "ai_interview_minutes", "INTEGER DEFAULT 25")
+        ensure_column(conn, "roles", "ai_interview_max_questions", "INTEGER DEFAULT 15")
         ensure_column(conn, "roles", "total_paper_marks", "REAL DEFAULT 0")
         ensure_column(conn, "roles", "shortlist_min_marks", "REAL DEFAULT 0")
         ensure_column(conn, "roles", "deleted_at", "TIMESTAMPTZ")
         return conn.execute(
             """
             SELECT role_id, role_slug, role_name, allowed_degrees, allowed_question_sets,
+                   COALESCE(aptitude_enabled, TRUE) AS aptitude_enabled,
+                   COALESCE(programming_enabled, TRUE) AS programming_enabled,
+                   COALESCE(ai_interview_enabled, FALSE) AS ai_interview_enabled,
                    COALESCE(aptitude_minutes, 20) AS aptitude_minutes,
                    COALESCE(programming_minutes, 20) AS programming_minutes,
+                   COALESCE(ai_interview_minutes, 25) AS ai_interview_minutes,
+                   COALESCE(ai_interview_max_questions, 15) AS ai_interview_max_questions,
                    COALESCE(total_paper_marks, 0) AS total_paper_marks,
                    COALESCE(shortlist_min_marks, 0) AS shortlist_min_marks
             FROM roles
@@ -560,6 +595,65 @@ def complete_interview(interview_id, total_score, report_path, shortlist_status,
         )
 
 
+def save_ai_interview_report(interview_id, turns, report_path):
+    with get_db() as conn:
+        ensure_column(conn, "interviews", "ai_interview_report_path", "TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_interview_turns (
+                turn_id SERIAL PRIMARY KEY,
+                interview_id TEXT NOT NULL REFERENCES interviews(interview_id) ON DELETE CASCADE,
+                question_number INTEGER NOT NULL,
+                question_text TEXT NOT NULL,
+                ai_started_at TEXT,
+                ai_finished_at TEXT,
+                candidate_started_at TEXT,
+                candidate_finished_at TEXT,
+                candidate_answer TEXT,
+                answer_seconds REAL DEFAULT 0,
+                timed_out BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        ensure_column(conn, "ai_interview_turns", "timed_out", "BOOLEAN DEFAULT FALSE")
+        conn.execute("DELETE FROM ai_interview_turns WHERE interview_id = %s", (interview_id,))
+        for turn in turns:
+            conn.execute(
+                """
+                INSERT INTO ai_interview_turns
+                    (interview_id, question_number, question_text, ai_started_at, ai_finished_at,
+                     candidate_started_at, candidate_finished_at, candidate_answer, answer_seconds, timed_out)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    interview_id,
+                    int(turn.get("question_number") or 0),
+                    str(turn.get("question_text") or ""),
+                    str(turn.get("ai_started_at") or ""),
+                    str(turn.get("ai_finished_at") or ""),
+                    str(turn.get("candidate_started_at") or ""),
+                    str(turn.get("candidate_finished_at") or ""),
+                    str(turn.get("candidate_answer") or ""),
+                    float(turn.get("answer_seconds") or 0),
+                    bool(turn.get("timed_out")),
+                ),
+            )
+        conn.execute(
+            "UPDATE interviews SET ai_interview_report_path = %s WHERE interview_id = %s",
+            (report_path, interview_id),
+        )
+
+
+def save_ai_interview_audio(interview_id, audio_path):
+    with get_db() as conn:
+        ensure_column(conn, "interviews", "ai_interview_audio_path", "TEXT")
+        conn.execute(
+            "UPDATE interviews SET ai_interview_audio_path = %s WHERE interview_id = %s",
+            (audio_path, interview_id),
+        )
+
+
 def save_candidate_answers(interview_id, results):
     with get_db() as conn:
         conn.execute("DELETE FROM candidate_answers WHERE interview_id = %s", (interview_id,))
@@ -582,10 +676,12 @@ def save_candidate_answers(interview_id, results):
 
 def list_reports():
     with get_db() as conn:
+        ensure_column(conn, "interviews", "ai_interview_report_path", "TEXT")
+        ensure_column(conn, "interviews", "ai_interview_audio_path", "TEXT")
         return conn.execute(
             """
             SELECT i.interview_id, i.date, i.total_score, i.status, i.shortlist_status,
-                   i.shortlist_reason, i.report_path, i.reviewer_note,
+                   i.shortlist_reason, i.report_path, i.ai_interview_report_path, i.ai_interview_audio_path, i.reviewer_note,
                    u.name, u.email, u.phone, u.candidate_location, u.candidate_degree, u.resume_path, r.role_name
             FROM interviews i
             JOIN users u ON u.user_id = i.user_id
@@ -594,6 +690,23 @@ def list_reports():
             ORDER BY i.date DESC
             """
         ).fetchall()
+
+
+def get_ai_interview_turns(interview_id):
+    with get_db() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT question_number, question_text, candidate_answer, answer_seconds, timed_out
+                FROM ai_interview_turns
+                WHERE interview_id = %s
+                ORDER BY question_number
+                """,
+                (interview_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        except Exception:
+            return []
 
 
 def question_keywords(topic, role_name, question_type):

@@ -50,7 +50,7 @@
         <h1>{{ role_name }} Interview</h1>
       </div>
       <div class="interview-actions">
-        <div class="progress"><span id="progressSection">Aptitude</span>: <span id="answeredCount">0</span>/<span id="sectionQuestionCount">0</span> answered</div>
+        <div class="progress"><span id="progressSection">{{ "Aptitude" if enabled_sections.Aptitude else ("Programming" if enabled_sections.Programming else "AI Interview") }}</span>: <span id="answeredCount">0</span>/<span id="sectionQuestionCount">0</span> answered</div>
         <button class="btn ghost" id="nextSectionButton" type="button" hidden>Next: Programming</button>
         <button class="btn primary top-submit" id="submitInterviewButton" type="button" hidden>Submit Test</button>
       </div>
@@ -73,27 +73,121 @@
 
     <div id="questions">
       <section class="section-launcher" id="sectionLauncher">
+        {% if enabled_sections.Aptitude %}
         <article class="test-section-card">
           <p class="eyebrow">Section 1</p>
           <h2>Aptitude</h2>
           <p>Logical Reasoning, Verbal Ability, Programming Aptitude, and role-related aptitude.</p>
           <button class="btn primary" type="button" data-start-section="Aptitude">Start Aptitude Test</button>
         </article>
+        {% endif %}
+        {% if enabled_sections.Programming %}
         <article class="test-section-card locked" id="programmingLauncher">
-          <p class="eyebrow">Section 2</p>
+          <p class="eyebrow">Section {{ 2 if enabled_sections.Aptitude else 1 }}</p>
           <h2>Programming</h2>
-          <p>Programming questions open after you finish Aptitude.</p>
-          <button class="btn primary" type="button" data-start-section="Programming" disabled>Locked</button>
+          <p>{{ "Programming questions open after you finish Aptitude." if enabled_sections.Aptitude else "Compiler-style programming output questions." }}</p>
+          <button class="btn primary" type="button" data-start-section="Programming" {{ "disabled" if enabled_sections.Aptitude else "" }}>{{ "Locked" if enabled_sections.Aptitude else "Start Programming" }}</button>
         </article>
+        {% endif %}
+        {% if enabled_sections["AI Interview"] %}
+        <article class="test-section-card locked" id="aiInterviewLauncher">
+          <p class="eyebrow">Round 3</p>
+          <h2>Round 3: AI Interview</h2>
+          <p>Interactive AI Interviewer round with live voice synthesis, spoken answer transcription, and empathetic guidance.</p>
+          <button class="btn primary" type="button" id="startAiInterviewLauncher" {{ "disabled" if enabled_sections.Aptitude or enabled_sections.Programming else "" }}>{{ "Locked" if enabled_sections.Aptitude or enabled_sections.Programming else "Start Round 3: AI Interview" }}</button>
+        </article>
+        {% endif %}
       </section>
 
       <section class="section-transition" id="programmingTransition" hidden>
         <div>
-          <p class="eyebrow">Aptitude Completed</p>
-          <h2>Continue to Programming</h2>
+          <p class="eyebrow">Round 1 Aptitude Completed</p>
+          <h2>Continue to Round 2: Programming</h2>
           <p>The Aptitude section is closed. Start the Programming section when you are ready.</p>
         </div>
-        <button class="btn primary" id="startProgrammingButton" type="button">Next Programming Session</button>
+        <button class="btn primary" id="startProgrammingButton" type="button">Start Round 2 Programming</button>
+      </section>
+
+      <section class="section-transition" id="aiInterviewTransition" hidden>
+        <div>
+          <p class="eyebrow">Technical Rounds Completed</p>
+          <h2>Continue to Round 3: AI Interview</h2>
+          <p>The AI Interviewer will conduct a warm, interactive conversation with up to 15 role-related questions.</p>
+        </div>
+        <button class="btn primary" id="startAiInterviewButton" type="button">Start Round 3: AI Interview</button>
+      </section>
+
+      <section class="ai-interview-panel" id="aiInterviewPanel" hidden>
+        <div class="round-badge-bar">
+          <span class="round-chip">Round 3 of 3</span>
+          <strong>WITTMANN Executive AI Interview</strong>
+          <span id="aiEmotionBadge" class="emotion-badge warm">Attentive & Professional</span>
+        </div>
+
+        <div class="ai-bot-card studio-card">
+          <div class="ai-hr-portrait-wrap">
+            <div class="ai-hr-portrait">
+              <svg class="hr-avatar-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="50" cy="50" r="48" fill="#0F172A"/>
+                <path d="M50 20C38.9543 20 30 28.9543 30 40C30 47.5 34.1 54.1 40.2 57.5C26.5 62.8 17 76.1 17 92H83C83 76.1 73.5 62.8 59.8 57.5C65.9 54.1 70 47.5 70 40C70 28.9543 61.0457 20 50 20Z" fill="#38BDF8"/>
+                <circle cx="43" cy="38" r="4" fill="#FFFFFF"/>
+                <circle cx="57" cy="38" r="4" fill="#FFFFFF"/>
+                <path d="M42 48C46 51 54 51 58 48" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
+                <path d="M50 56V72M44 64H56" stroke="#E2E8F0" stroke-width="3" stroke-linecap="round"/>
+              </svg>
+              <div class="voice-equalizer" id="voiceEqualizer">
+                <span></span><span></span><span></span><span></span><span></span>
+              </div>
+            </div>
+          </div>
+          <div class="ai-hr-meta">
+            <p class="eyebrow">WITTMANN AI Interviewer</p>
+            <h2 id="aiInterviewStatus">Preparing Interview Studio...</h2>
+            <p id="aiQuestionCounter">0/{{ ai_interview_questions|length }} questions | {{ (section_durations["AI Interview"] // 60) if section_durations["AI Interview"] else 25 }} minutes max</p>
+          </div>
+        </div>
+
+        <div id="aiEncouragingBanner" class="encouraging-banner" hidden>
+          <div class="banner-content">
+            <span class="reassure-icon">💡</span>
+            <span><strong>Don't panic or feel rushed!</strong> Take a deep breath — feel free to express your thoughts naturally in your own words.</span>
+          </div>
+        </div>
+
+        <div class="subtitle-stage studio-subtitles" aria-live="polite">
+          <div class="subtitle-row ai-row">
+            <span class="speaker-tag ai-tag">AI Interviewer</span>
+            <p id="aiSubtitle">Starting Round 3 AI Interview...</p>
+          </div>
+          <div class="subtitle-divider"></div>
+          <div class="subtitle-row candidate-row">
+            <div class="candidate-tag-wrap">
+              <span class="speaker-tag candidate-tag">Candidate Spoken Answer</span>
+              <div class="candidate-voice-equalizer" id="candidateVoiceEqualizer" title="Microphone Live Frequency Volume">
+                <span class="bar b1"></span>
+                <span class="bar b2"></span>
+                <span class="bar b3"></span>
+                <span class="bar b4"></span>
+                <span class="bar b5"></span>
+              </div>
+            </div>
+            <p id="candidateSubtitle">Listening for your response...</p>
+          </div>
+        </div>
+
+        <div class="manual-answer-container">
+          <label for="aiManualAnswer" class="manual-answer-label">
+            <strong>Edit or Type Your Answer (Fallback Text Input)</strong>
+            <small>If speech recognition misses any words, you can edit or type your answer directly in the box below before clicking Save.</small>
+          </label>
+          <textarea id="aiManualAnswer" placeholder="Your live transcribed answer appears here. You can also type or edit your answer directly..."></textarea>
+        </div>
+
+        <div class="ai-interview-actions">
+          <button class="btn ghost" id="repeatAiQuestionButton" type="button">Repeat Question</button>
+          <button class="btn primary" id="saveAiAnswerButton" type="button" disabled>Save Answer & Next Question</button>
+          <button class="btn primary" id="finishAiInterviewButton" type="button" hidden>Finish AI Interview</button>
+        </div>
       </section>
 
       {% set ns = namespace(current_category='', section_index=0) %}
@@ -205,8 +299,11 @@
 <script>
   window.QUESTIONS = JSON.parse(document.getElementById('questions-data').textContent);
   window.SECTION_DURATIONS = {{ section_durations | tojson | safe }};
+  window.ENABLED_SECTIONS = {{ enabled_sections | tojson | safe }};
+  window.AI_INTERVIEW_QUESTIONS = {{ ai_interview_questions | tojson | safe }};
   window.TOTAL_TEST_SECONDS = {{ total_test_seconds | tojson | safe }};
   window.PROCTORING_SETTINGS = {{ proctoring_settings | tojson | safe }};
+  window.CANDIDATE_NAME = {{ candidate.name | tojson | safe }};
 </script>
 <script src="{{ url_for('static', filename='js/interview.js') }}"></script>
 {% endblock %}

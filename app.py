@@ -16,6 +16,24 @@ from email.message import EmailMessage
 from pathlib import Path
 
 import cv2
+import base64
+import json
+import os
+import random
+import re
+import secrets
+import smtplib
+import tempfile
+import urllib.parse
+import urllib.request
+import uuid
+import zipfile
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+from email.message import EmailMessage
+from pathlib import Path
+
+import cv2
 import numpy as np
 from dotenv import load_dotenv
 
@@ -23,7 +41,6 @@ load_dotenv()
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 from markupsafe import Markup, escape
-
 from utils.ai_wrapper import ai_wrapper
 from utils.database import (
     DB_LABEL,
@@ -31,6 +48,7 @@ from utils.database import (
     create_test_link,
     create_interview,
     create_user,
+    get_ai_interview_turns,
     get_test_link,
     get_proctoring_settings,
     init_db,
@@ -40,11 +58,13 @@ from utils.database import (
     load_database_snapshot,
     mark_test_link_used,
     save_candidate_answers,
+    save_ai_interview_audio,
+    save_ai_interview_report,
     save_interview_questions,
     update_interview_progress,
 )
-from utils.question_bank import ensure_question_bank_indexes, select_questions_for_role
-from utils.report import generate_pdf_report
+from utils.question_bank import ensure_question_bank_indexes, select_ai_interview_questions, select_questions_for_role
+from utils.report import generate_ai_interview_report, generate_pdf_report
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
@@ -53,9 +73,71 @@ DATA_PATH = BASE_DIR / "data" / "questions.json"
 REPORT_DIR = Path(os.getenv("REPORT_DIR", str(BASE_DIR / "reports"))).resolve()
 RESUME_DIR = REPORT_DIR / "resumes"
 PROFILE_PHOTO_DIR = REPORT_DIR / "profile_photos"
+AI_AUDIO_DIR = REPORT_DIR / "ai_interview_audio"
 DEFAULT_COMPANY_NAME = "WITTMANN BATTENFELD India Pvt. Ltd."
 ALLOWED_RESUME_EXTENSIONS = {".pdf", ".docx", ".txt"}
 SHORTLIST_MIN_SCORE = float(os.getenv("SHORTLIST_MIN_SCORE", "70"))
+
+
+def bool_from_role(role, key, default=False):
+    if isinstance(role, dict):
+        value = role.get(key, default)
+    else:
+        value = getattr(role, key, default)
+    return bool(value)
+
+
+def int_from_role(role, key, default, minimum=1, maximum=180):
+    if isinstance(role, dict):
+        value = role.get(key, default)
+    else:
+        value = getattr(role, key, default)
+    try:
+        number = int(value or default)
+    except (TypeError, ValueError):
+        number = default
+    return min(max(number, minimum), maximum)
+
+
+def build_ai_interview_questions(role_name, max_questions=15):
+    role_label = role_name or "the selected role"
+    templates = [
+        "Please introduce yourself and highlight your educational background and technical experience relevant to {role}.",
+        "What specific skills, tools, or domain knowledge make you a strong candidate for the {role} position at WITTMANN?",
+        "Describe a recent project or technical task related to {role} that you completed successfully.",
+        "Walk me through a challenging problem or bug you encountered in {role} and how you diagnosed and resolved it.",
+        "How do you ensure high quality, reliability, and precision in your work as a {role}?",
+        "What attracted you to WITTMANN BATTENFELD India and our industrial technology products?",
+        "How do you manage your time and prioritize tasks when faced with multiple urgent deadlines in {role}?",
+        "Tell me about a situation where you had to learn a new tool, technology, or framework quickly for {role}.",
+        "Describe a scenario where a mistake or unexpected issue occurred in your project. How did you handle it and what did you learn?",
+        "How do you effectively communicate technical details or progress updates to team members and managers?",
+        "Tell me about a time you collaborated with a cross-functional team to achieve a shared objective in {role}.",
+        "How do you handle constructive feedback or critical reviews of your work?",
+        "What are your key goals and expected contributions during your first 90 days as a {role} at WITTMANN?",
+        "What are your expectations regarding work location, shift flexibility, and career growth for {role}?",
+        "Do you have any specific questions for us regarding the {role} team, culture, or technology stack at WITTMANN?",
+    ]
+    count = min(max(int(max_questions or 15), 1), 15)
+    return [item.format(role=role_label) for item in templates[:count]]
+
+
+def ai_question_texts_from_bank(role_slug, role_name, max_questions=15, allowed_question_sets=""):
+    limit = min(max(int(max_questions or 15), 1), 15)
+    bank_questions = select_ai_interview_questions(
+        role_slug,
+        max_questions=limit,
+        allowed_question_sets=allowed_question_sets,
+    )
+    result_questions = []
+    if bank_questions:
+        result_questions = [question.get("question", "").strip() for question in bank_questions if question.get("question")]
+    if len(result_questions) < limit:
+        fallback = build_ai_interview_questions(role_name, limit)
+        for item in fallback:
+            if item not in result_questions and len(result_questions) < limit:
+                result_questions.append(item)
+    return result_questions[:limit]
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
@@ -911,8 +993,13 @@ def interview():
     allowed_degrees = allowed_degrees or ""
     allowed_question_sets = role.get("allowed_question_sets") if isinstance(role, dict) else getattr(role, "allowed_question_sets", "")
     allowed_question_sets = allowed_question_sets or ""
-    aptitude_minutes = role.get("aptitude_minutes") if isinstance(role, dict) else getattr(role, "aptitude_minutes", 20)
-    programming_minutes = role.get("programming_minutes") if isinstance(role, dict) else getattr(role, "programming_minutes", 20)
+    aptitude_enabled = bool_from_role(role, "aptitude_enabled", True)
+    programming_enabled = bool_from_role(role, "programming_enabled", True)
+    ai_interview_enabled = bool_from_role(role, "ai_interview_enabled", True)
+    aptitude_minutes = int_from_role(role, "aptitude_minutes", 20)
+    programming_minutes = int_from_role(role, "programming_minutes", 20)
+    ai_interview_minutes = int_from_role(role, "ai_interview_minutes", 25)
+    ai_interview_max_questions = int_from_role(role, "ai_interview_max_questions", 15, 1, 15)
     total_paper_marks = role.get("total_paper_marks") if isinstance(role, dict) else getattr(role, "total_paper_marks", 0)
     total_paper_marks = int(total_paper_marks or 0)
     shortlist_min_marks = role.get("shortlist_min_marks") if isinstance(role, dict) else getattr(role, "shortlist_min_marks", 0)
@@ -931,6 +1018,14 @@ def interview():
             allowed_question_sets=allowed_question_sets,
             total_paper_marks=total_paper_marks,
         )
+        enabled_question_sections = []
+        if aptitude_enabled:
+            enabled_question_sections.append("Aptitude")
+        if programming_enabled:
+            enabled_question_sections.append("Programming")
+        questions = [question for question in questions if question.get("category") in enabled_question_sections]
+        if not questions and not ai_interview_enabled:
+            raise ValueError("This role has no enabled interview sections. Enable at least one section in the HR portal.")
     except ValueError as exc:
         session.pop("role_id", None)
         session.pop("role_name", None)
@@ -943,15 +1038,29 @@ def interview():
     section_durations = {
         "Aptitude": max(int(aptitude_minutes or 20), 1) * 60,
         "Programming": max(int(programming_minutes or 20), 1) * 60,
+        "AI Interview": max(int(ai_interview_minutes or 25), 1) * 60,
     }
+    enabled_sections = {
+        "Aptitude": aptitude_enabled,
+        "Programming": programming_enabled,
+        "AI Interview": ai_interview_enabled,
+    }
+    ai_interview_questions = ai_question_texts_from_bank(
+        role_slug,
+        session.get("role_name", ""),
+        ai_interview_max_questions,
+        allowed_question_sets,
+    )
 
     return render_template(
         "interview.html",
         questions=questions,
+        enabled_sections=enabled_sections,
+        ai_interview_questions=ai_interview_questions,
         candidate=session.get("candidate", {}),
         role_name=session.get("role_name", ""),
         section_durations=section_durations,
-        total_test_seconds=sum(section_durations.values()),
+        total_test_seconds=sum(seconds for section, seconds in section_durations.items() if enabled_sections.get(section)),
         proctoring_settings=proctoring_settings,
         company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
@@ -1005,6 +1114,90 @@ def update_progress():
         question_text=str(payload.get("question_text") or "").strip()[:1000],
     )
     return jsonify({"updated": True})
+
+
+@app.route("/api/ai-hr-reply", methods=["POST"])
+def ai_hr_reply():
+    payload = request.get_json(silent=True) or {}
+    candidate_text = str(payload.get("candidate_text") or "").strip()
+    current_question = str(payload.get("current_question") or "").strip()
+    role_name = session.get("role_name", "")
+
+    text_lower = candidate_text.lower()
+
+    if any(p in text_lower for p in ["repeat", "say again", "pardon", "didn't hear", "did not hear", "one more time"]):
+        reply = f"Certainly! The question is: {current_question}"
+    elif any(p in text_lower for p in ["wittmann", "company", "about the company", "organization"]):
+        reply = "WITTMANN BATTENFELD is a global leader in injection molding machines, robotics, and auxiliary automation systems."
+    elif any(p in text_lower for p in ["role", "job", "position", "what is this role"]):
+        reply = f"For the {role_name or 'selected'} position, we are looking for strong practical experience, problem-solving, and team collaboration."
+    elif any(p in text_lower for p in ["what do you mean", "explain", "clarify", "example", "help me understand", "detail"]):
+        reply = f"Sure! Share a real example or perspective from your past experience related to '{current_question[:80]}'."
+    elif text_lower.endswith("?") or any(text_lower.startswith(w) for w in ["what", "how", "why", "can you", "could you", "where", "when", "is it"]):
+        reply = f"That's a good question! Please share your thoughts on: {current_question}"
+    else:
+        reply = "Thank you for sharing. Please continue with your answer."
+
+    return jsonify({"reply": reply})
+
+
+import subprocess
+try:
+    import imageio_ffmpeg
+    import speech_recognition as sr
+except ImportError:
+    imageio_ffmpeg = None
+    sr = None
+
+
+def transcribe_audio_bytes(audio_bytes: bytes) -> str:
+    if not audio_bytes or not imageio_ffmpeg or not sr:
+        return ""
+    try:
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as in_file:
+            in_file.write(audio_bytes)
+            in_path = in_file.name
+        out_path = in_path + ".wav"
+        try:
+            cmd = [ffmpeg_exe, "-y", "-i", in_path, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,volume=4.0,highpass=f=80", "-ac", "1", "-ar", "16000", out_path]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            r = sr.Recognizer()
+            r.energy_threshold = 80
+            r.dynamic_energy_threshold = True
+            with sr.AudioFile(out_path) as source:
+                audio_data = r.record(source)
+                try:
+                    text = r.recognize_google(audio_data, language="en-IN")
+                except Exception:
+                    try:
+                        text = r.recognize_google(audio_data, language="en-US")
+                    except Exception:
+                        text = ""
+                return text.strip()
+        except Exception:
+            return ""
+        finally:
+            for p in [in_path, out_path]:
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+    except Exception:
+        return ""
+
+
+@app.route("/api/transcribe-audio", methods=["POST"])
+def transcribe_audio_endpoint():
+    audio_file = request.files.get("audio")
+    if not audio_file:
+        return jsonify({"text": ""})
+    audio_bytes = audio_file.read()
+    if not audio_bytes or len(audio_bytes) < 100:
+        return jsonify({"text": ""})
+    text = transcribe_audio_bytes(audio_bytes)
+    return jsonify({"text": text})
 
 
 @app.route("/api/analyze-frame", methods=["POST"])
@@ -1116,12 +1309,34 @@ def submit_interview():
             }
         )
 
+    payload = request.get_json(force=True)
+    candidate = session.get("candidate", {})
+    candidate_name = candidate.get("name") or payload.get("candidate_name", "Candidate")
+    answers = payload.get("answers", {})
+    proctoring_violations = payload.get("proctoring_violations", [])
+    auto_submit_reason = payload.get("auto_submit_reason", "")
+    questions = load_interview_questions(session.get("interview_id")) if session.get("interview_id") else load_questions()
+
+    results = []
+    for question in questions:
+        answer = answers.get(str(question["id"]), "")
+        evaluation = ai_wrapper.evaluate_answer(answer, question)
+        results.append(
+            {
+                "question": question,
+                "answer": answer,
+                "score": evaluation["score"],
+                "feedback": evaluation["feedback"],
+            }
+        )
+
     interview_id = session.get("interview_id")
     overall_percent, earned_marks, total_marks = calculate_weighted_score(results)
     if interview_id:
         save_candidate_answers(interview_id, results)
 
     stats = session.get("face_stats", {"total_frames": 0, "detected_frames": 0, "smile_frames": 0, "stable_frames": 0})
+    rejected = proctoring_rejected(proctoring_violations)
     total = max(stats.get("total_frames", 0), 1)
     face_summary = {
         **stats,
@@ -1140,12 +1355,19 @@ def submit_interview():
     shortlist_status, shortlist_reason = shortlist_candidate(earned_marks, proctoring_violations, shortlist_min_marks)
     face_summary["shortlist_status"] = shortlist_status
     face_summary["shortlist_reason"] = shortlist_reason
-    report_path = generate_pdf_report(candidate_name, results, face_summary, str(REPORT_DIR))
+
+    ai_turns = session.get("ai_transcript") or []
+    if not ai_turns and interview_id:
+        try:
+            ai_turns = get_ai_interview_turns(interview_id)
+        except Exception:
+            ai_turns = []
+
+    report_path = generate_pdf_report(candidate_name, results, face_summary, str(REPORT_DIR), ai_turns=ai_turns)
     session["last_report"] = report_path
     if interview_id:
         complete_interview(interview_id, earned_marks, report_path, shortlist_status, shortlist_reason)
 
-    rejected = proctoring_rejected(proctoring_violations)
     completion = {
         "status": "rejected" if rejected else "submitted",
         "title": "Suspicious Activity Detected" if rejected else "Interview Submitted",
@@ -1159,6 +1381,72 @@ def submit_interview():
     }
     session["completion_result"] = completion
     return jsonify({"submitted": True, "redirect_url": url_for("interview_result"), **completion})
+
+
+@app.route("/api/ai-interview-report", methods=["POST"])
+def api_ai_interview_report():
+    interview_id = session.get("interview_id")
+    if not interview_id:
+        return jsonify({"saved": False, "error": "Interview session not found."}), 400
+    payload = request.get_json(force=True)
+    turns = payload.get("turns") or []
+    if not isinstance(turns, list):
+        return jsonify({"saved": False, "error": "Invalid AI interview transcript."}), 400
+    clean_turns = []
+    for index, turn in enumerate(turns[:15], start=1):
+        clean_turns.append({
+            "question_number": int(turn.get("question_number") or index),
+            "question_text": str(turn.get("question_text") or "")[:2000],
+            "ai_started_at": str(turn.get("ai_started_at") or "")[:80],
+            "ai_finished_at": str(turn.get("ai_finished_at") or "")[:80],
+            "candidate_started_at": str(turn.get("candidate_started_at") or "")[:80],
+            "candidate_finished_at": str(turn.get("candidate_finished_at") or "")[:80],
+            "candidate_answer": str(turn.get("candidate_answer") or "")[:6000],
+            "answer_seconds": float(turn.get("answer_seconds") or 0),
+            "timed_out": bool(turn.get("timed_out")),
+        })
+    candidate = session.get("candidate", {})
+    candidate_name = candidate.get("name") or "Candidate"
+    role_name = session.get("role_name", "")
+    report_path = generate_ai_interview_report(
+        candidate_name,
+        role_name,
+        clean_turns,
+        {
+            "started_at": payload.get("started_at", ""),
+            "completed_at": payload.get("completed_at", ""),
+            "auto_submit_reason": payload.get("auto_submit_reason", ""),
+        },
+        str(REPORT_DIR),
+    )
+    save_ai_interview_report(interview_id, clean_turns, report_path)
+    update_interview_progress(
+        interview_id,
+        section="AI Interview completed",
+        question_number=None,
+        question_text=f"{len(clean_turns)} AI HR questions recorded",
+    )
+    return jsonify({"saved": True, "report_path": report_path})
+
+
+@app.route("/api/ai-interview-audio", methods=["POST"])
+def api_ai_interview_audio():
+    interview_id = session.get("interview_id")
+    if not interview_id:
+        return jsonify({"saved": False, "error": "Interview session not found."}), 400
+    audio_file = request.files.get("audio")
+    if not audio_file:
+        return jsonify({"saved": False, "error": "No audio file received."}), 400
+    candidate_name = session.get("candidate", {}).get("name") or "candidate"
+    safe_name = "_".join(re.sub(r"[^A-Za-z0-9 ]+", " ", candidate_name).split()) or "candidate"
+    extension = Path(secure_filename(audio_file.filename or "ai-interview.webm")).suffix.lower()
+    if extension not in {".webm", ".mp4", ".m4a", ".ogg", ".wav"}:
+        extension = ".webm"
+    AI_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = AI_AUDIO_DIR / f"{safe_name}_ai_hr_audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}{extension}"
+    audio_file.save(output_path)
+    save_ai_interview_audio(interview_id, str(output_path))
+    return jsonify({"saved": True, "audio_path": str(output_path)})
 
 
 @app.route("/interview/result")

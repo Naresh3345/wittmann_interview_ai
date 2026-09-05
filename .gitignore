@@ -8,5 +8,11 @@ reports/resumes/*
 !reports/resumes/.gitkeep
 *.log
 tools/cloudflared.exe
+cloudflared.exe
+*.exe
+reports/ai_interview_audio/*
+!reports/ai_interview_audio/.gitkeep
+reports/profile_photos/*
+!reports/profile_photos/.gitkeep
 venv/
 node_modules

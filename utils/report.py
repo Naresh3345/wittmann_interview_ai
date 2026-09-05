@@ -5,7 +5,7 @@ from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Image, LongTable, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import Image, LongTable, PageBreak, Paragraph, Spacer, Table, TableStyle
 from xml.sax.saxutils import escape
 
 
@@ -84,7 +84,7 @@ def _answer_status(result):
     }
 
 
-def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, output_dir="reports") -> str:
+def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, output_dir="reports", ai_turns=None) -> str:
     Path(output_dir).mkdir(exist_ok=True)
     safe_name = "_".join(candidate_name.strip().split()) or "candidate"
     filename = f"{safe_name}_interview_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -108,15 +108,16 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
         alignment=1,
     )
     heading_style = ParagraphStyle("ReportHeading", parent=styles["Heading2"], spaceBefore=8, spaceAfter=6)
+    subheading_style = ParagraphStyle("ReportSubHeading", parent=styles["Heading3"], spaceBefore=6, spaceAfter=4)
     normal_style = ParagraphStyle("ReportNormal", parent=styles["Normal"], fontSize=8.5, leading=10.5)
+    table_cell_style = ParagraphStyle("TableCell", parent=normal_style, wordWrap="CJK", leading=10)
     table_header_style = ParagraphStyle(
         "TableHeader",
-        parent=normal_style,
-        textColor=colors.white,
+        parent=table_cell_style,
         fontName="Helvetica-Bold",
+        alignment=1,
         leading=10,
     )
-    table_cell_style = ParagraphStyle("TableCell", parent=normal_style, wordWrap="CJK", leading=10)
     detail_question_style = ParagraphStyle(
         "DetailQuestion",
         parent=styles["Heading3"],
@@ -333,5 +334,90 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
             story.append(Paragraph(f"Matched Keywords: {escape(matched)}", normal_style))
             story.append(Spacer(1, 8))
 
+    if ai_turns:
+        story.append(PageBreak())
+        story.append(Paragraph(f"Round 3: AI Interview Report ({len(ai_turns)} Spoken Questions)", heading_style))
+        story.append(Paragraph("Candidate Spoken Responses & Evaluation Transcript", subheading_style))
+        story.append(Spacer(1, 8))
+        for idx, turn in enumerate(ai_turns, start=1):
+            q_text = turn.get("question_text") or f"Question {idx}"
+            a_text = turn.get("candidate_answer") or "Not answered"
+            secs = turn.get("answer_seconds") or 0
+            story.append(Paragraph(f"Q{idx}. AI Question: {_escaped_lines(q_text)}", detail_question_style))
+            story.append(Paragraph(f"Candidate Spoken Answer ({secs}s duration): {_escaped_lines(a_text)}", normal_style))
+            story.append(Spacer(1, 8))
+
+    doc.build(story)
+    return path
+
+
+def generate_ai_interview_report(candidate_name: str, role_name: str, turns: list, summary: dict, output_dir="reports") -> str:
+    Path(output_dir).mkdir(exist_ok=True)
+    safe_name = "_".join(candidate_name.strip().split()) or "candidate"
+    filename = f"{safe_name}_ai_hr_interview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    path = str(Path(output_dir) / filename)
+    from reportlab.platypus import SimpleDocTemplate
+
+    doc = SimpleDocTemplate(
+        path,
+        pagesize=A4,
+        leftMargin=32,
+        rightMargin=32,
+        topMargin=42,
+        bottomMargin=42,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("ReportTitle", parent=styles["Title"], fontSize=16, leading=19, alignment=1)
+    heading_style = ParagraphStyle("ReportHeading", parent=styles["Heading2"], spaceBefore=8, spaceAfter=6)
+    normal_style = ParagraphStyle("ReportNormal", parent=styles["Normal"], fontSize=8.5, leading=10.5)
+    table_header_style = ParagraphStyle("TableHeader", parent=normal_style, textColor=colors.white, fontName="Helvetica-Bold")
+    table_cell_style = ParagraphStyle("TableCell", parent=normal_style, wordWrap="CJK", leading=10)
+    story = []
+
+    total_answer_seconds = sum(float(turn.get("answer_seconds") or 0) for turn in turns)
+    story.append(Paragraph("WITTMANN BATTENFELD India Pvt. Ltd. AI Interview System", title_style))
+    story.append(Paragraph("AI HR Interview Transcript Report", heading_style))
+    story.append(Paragraph(f"Candidate: {escape(candidate_name)}", normal_style))
+    story.append(Paragraph(f"Role: {escape(role_name or 'Selected Role')}", normal_style))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%d-%m-%Y %I:%M %p')}", normal_style))
+    story.append(Paragraph(f"Questions Asked: {len(turns)}", normal_style))
+    story.append(Paragraph(f"Candidate Speaking Time: {_format_number(total_answer_seconds / 60)} minutes", normal_style))
+    if summary.get("started_at"):
+        story.append(Paragraph(f"Started At: {escape(str(summary.get('started_at')))}", normal_style))
+    if summary.get("completed_at"):
+        story.append(Paragraph(f"Completed At: {escape(str(summary.get('completed_at')))}", normal_style))
+    if summary.get("auto_submit_reason"):
+        story.append(Paragraph(f"Completion Note: {escape(str(summary.get('auto_submit_reason')))}", normal_style))
+    story.append(Spacer(1, 12))
+
+    rows = [[
+        _paragraph("No", table_header_style),
+        _paragraph("Question", table_header_style),
+        _paragraph("Answer Seconds", table_header_style),
+        _paragraph("Status", table_header_style),
+        _paragraph("Candidate Answer", table_header_style),
+    ]]
+    for turn in turns:
+        rows.append([
+            _paragraph(str(turn.get("question_number") or ""), table_cell_style),
+            _paragraph(turn.get("question_text") or "", table_cell_style),
+            _paragraph(_format_number(turn.get("answer_seconds") or 0), table_cell_style),
+            _paragraph("Timed out" if turn.get("timed_out") else "Answered", table_cell_style),
+            _paragraph(turn.get("candidate_answer") or "Not answered", table_cell_style),
+        ])
+    table = LongTable(rows, colWidths=[28, doc.width * 0.30, doc.width * 0.13, doc.width * 0.13, doc.width * 0.36], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#d1d5db")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(table)
     doc.build(story)
     return path

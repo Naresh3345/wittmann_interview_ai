@@ -12,8 +12,15 @@
     <label class="role-card">
       <input type="radio" name="role_id" value="{{ role.role_id }}" required>
       <span>{{ role.role_name }}</span>
-      <small>Section 1: Aptitude | Section 2: Programming output tests</small>
+      <small>
+        {% if role.aptitude_enabled %}Section 1: Aptitude{% endif %}
+        {% if role.programming_enabled %}{{ " | " if role.aptitude_enabled else "" }}Section {{ 2 if role.aptitude_enabled else 1 }}: Programming{% endif %}
+        {% if role.ai_interview_enabled %} | Section {{ 3 if role.aptitude_enabled and role.programming_enabled else (2 if role.aptitude_enabled or role.programming_enabled else 1) }}: AI Interview{% endif %}
+      </small>
       <small>Question set: {{ role.allowed_question_sets or "All available sets" }}</small>
+      {% if role.ai_interview_enabled %}
+      <small>AI Interview: up to {{ role.ai_interview_max_questions or 15 }} questions / {{ role.ai_interview_minutes or 25 }} minutes</small>
+      {% endif %}
       <small>Allowed degree: {{ role.allowed_degrees or "Any degree" }}</small>
     </label>
     {% endfor %}
@@ -36,8 +43,9 @@
     <button class="btn primary role-submit" id="startRoleButton" type="submit">Continue to Camera Test</button>
   </form>
 </main>
+<div id="serverError" data-error="{{ error or '' }}" hidden></div>
 <script>
-  const serverError = {{ (error or "")|tojson }};
+  const serverError = document.getElementById("serverError").dataset.error;
   if (serverError) {
     alert(serverError);
   }
