@@ -2,6 +2,7 @@ import json
 import random
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from psycopg.types.json import Jsonb
 
@@ -11,6 +12,13 @@ from utils.database import get_db
 SECTION_COUNTS = {"Aptitude": 20, "Programming": 10}
 SQL_PROGRAMMING_MIN = 3
 SQL_PROGRAMMING_MAX = 4
+
+
+def row_value(row: Any, key: str, default: Any = None) -> Any:
+    try:
+        return dict(row).get(key, default)
+    except (TypeError, ValueError):
+        return default
 
 
 def ensure_question_bank_indexes():
@@ -62,17 +70,17 @@ def ensure_question_bank_indexes():
 
 def normalize_question(row):
     return {
-        "id": str(row["question_id"]),
-        "set": row.get("question_set", "Set 1"),
-        "category": row["section"],
-        "difficulty": row.get("difficulty", "Medium"),
-        "question": row["question_text"],
-        "ideal_answer": row["correct_answer"],
-        "correct_answer": row["correct_answer"],
-        "options": row.get("options") or [],
-        "keywords": row.get("keywords") or [],
-        "topic": row.get("topic", ""),
-        "marks": row.get("marks", 5),
+        "id": str(row_value(row, "question_id")),
+        "set": row_value(row, "question_set", "Set 1"),
+        "category": row_value(row, "section"),
+        "difficulty": row_value(row, "difficulty", "Medium"),
+        "question": row_value(row, "question_text"),
+        "ideal_answer": row_value(row, "correct_answer"),
+        "correct_answer": row_value(row, "correct_answer"),
+        "options": row_value(row, "options") or [],
+        "keywords": row_value(row, "keywords") or [],
+        "topic": row_value(row, "topic", ""),
+        "marks": row_value(row, "marks", 5),
     }
 
 
@@ -192,11 +200,23 @@ def select_questions_for_role(role_slug, excluded_ids=None, allowed_question_set
                 """,
                 tuple(params),
             ).fetchall()
-            if not pool:
-                source_label = f" in selected sets: {', '.join(question_sets)}" if question_sets else ""
-                raise ValueError(
-                    f"PostgreSQL question bank has no active {section} questions for role '{role_slug}'{source_label}."
-                )
+            if len(pool) < count:
+                existing_ids = [item["question_id"] for item in pool]
+                all_excluded = list(excluded_ids.union(set(existing_ids)))
+                extra_pool = conn.execute(
+                    """
+                    SELECT *
+                    FROM question_bank
+                    WHERE role_slug = %s
+                      AND section = %s
+                      AND active = TRUE
+                      AND deleted_at IS NULL
+                      AND question_id <> ALL(%s)
+                    """,
+                    (role_slug, section, all_excluded if all_excluded else [-1]),
+                ).fetchall()
+                pool.extend(extra_pool)
+
             if len(pool) < count:
                 source_label = f" in selected sets: {', '.join(question_sets)}" if question_sets else ""
                 raise ValueError(

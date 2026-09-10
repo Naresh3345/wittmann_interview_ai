@@ -59,6 +59,17 @@
         </tbody>
       </table>
     </div>
+
+    <div class="db-pagination-bar">
+      <div class="pagination-info">
+        <span class="pagination-badge">{{ table.name }}</span>
+        <span class="pagination-text">Showing {{ table.rows|length }} records</span>
+      </div>
+      <div class="pagination-controls">
+        <button type="button" class="btn secondary sm prev-page-btn" disabled>&laquo; Previous</button>
+        <button type="button" class="btn secondary sm next-page-btn">Next &raquo;</button>
+      </div>
+    </div>
     {% else %}
     <p class="empty-table">No data stored yet.</p>
     {% endif %}

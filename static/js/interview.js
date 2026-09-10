@@ -61,7 +61,9 @@ let warningTotal = 0;
 let tabSwitchTotal = 0;
 let submitted = false;
 let timerInterval;
+let perQuestionTimeLeft = 60;
 let totalTimerInterval;
+
 let progressTimer;
 let activeSection = '';
 let activeQuestionIndex = 0;
@@ -219,9 +221,10 @@ aiManualAnswer?.addEventListener('input', () => {
     candidateSubtitle.innerText = aiManualAnswer.value.trim() || 'Listening for your answer...';
   }
   if (saveAiAnswerButton) {
-    saveAiAnswerButton.disabled = !aiManualAnswer.value.trim();
+    saveAiAnswerButton.disabled = false;
   }
 });
+
 
 document.querySelectorAll('textarea').forEach((textarea) => {
   textarea.addEventListener('focus', () => {
@@ -645,7 +648,9 @@ questionDotGrid?.addEventListener('click', (event) => {
 });
 
 function showCurrentQuestion() {
+  perQuestionTimeLeft = (activeSection === 'Programming') ? 90 : 60;
   const questions = sectionQuestions();
+
   const total = questions.length;
   document.querySelectorAll('.section-divider').forEach((item) => {
     item.hidden = true;
@@ -686,7 +691,7 @@ function updateQuestionNavigation() {
     questionBackButton.disabled = activeQuestionIndex <= 0;
   }
   if (questionNextButton) {
-    questionNextButton.disabled = !currentQuestion || !isQuestionAnswered(currentQuestion);
+    questionNextButton.disabled = !currentQuestion;
     const nextSection = nextAfterWrittenSection(activeSection);
     if (isLastQuestion && nextSection === 'Programming') {
       questionNextButton.textContent = 'Next Programming Session';
@@ -700,7 +705,7 @@ function updateQuestionNavigation() {
   }
   if (submitInterviewButton) {
     submitInterviewButton.hidden = !canSubmitFromWrittenSection(activeSection) || !isLastQuestion;
-    submitInterviewButton.disabled = !canSubmitFromWrittenSection(activeSection) || !currentQuestion || !isQuestionAnswered(currentQuestion);
+    submitInterviewButton.disabled = !canSubmitFromWrittenSection(activeSection) || !currentQuestion;
   }
 }
 
@@ -720,10 +725,9 @@ function goToNextQuestion() {
   if (!activeSection || submitted) return;
   const currentQuestion = getCurrentQuestion();
   if (currentQuestion && !isQuestionAnswered(currentQuestion)) {
-    showWarningPopup('Please answer this question before continuing.');
-    updateQuestionNavigation();
-    return;
+    markCurrentQuestionSkippedIfNeeded();
   }
+
   const total = sectionQuestionTotal(activeSection);
   if (activeQuestionIndex < total - 1) {
     clearSkippedIfAnswered(currentQuestion);
@@ -1549,10 +1553,12 @@ function saveCurrentAiAnswer(options = {}) {
   stopSpeechSupervisor();
   stopContinuousAudioTranscribe();
   const answer = (aiManualAnswer?.value || '').trim();
-  if (!answer && !options.allowBlank) {
+  const allowBlank = options.allowBlank !== false;
+  if (!answer && !allowBlank) {
     showWarningPopup('Please answer before saving, or wait for the timer to move forward.');
     return;
   }
+
   clearTimeout(aiAnswerTimer);
   clearInterval(aiAnswerStatusTimer);
   clearTimeout(aiHesitationTimer);
@@ -1685,7 +1691,19 @@ function startSectionTimer() {
     if (!activeSection || submitted) return;
     sectionRemaining[activeSection] -= 1;
     updateTimerDisplay();
+
+    if (activeSection === 'Aptitude' || activeSection === 'Programming') {
+      perQuestionTimeLeft -= 1;
+      if (perQuestionTimeLeft <= 0) {
+        perQuestionTimeLeft = (activeSection === 'Programming') ? 90 : 60;
+        showWarningPopup('Time ended for this question. Moving to next question.');
+        goToNextQuestion();
+        return;
+      }
+    }
+
     if (sectionRemaining[activeSection] <= 0) {
+
       if (activeSection === 'Aptitude') {
         aptitudeCompleted = true;
         activeSection = '';

@@ -91,6 +91,17 @@
         </tbody>
       </table>
     </div>
+
+    <div class="db-pagination-bar" id="reportsPaginationBar">
+      <div class="pagination-info">
+        <span class="pagination-badge">Candidates</span>
+        <span class="pagination-text" id="reportsPaginationText">Showing {{ reports|length }} candidates</span>
+      </div>
+      <div class="pagination-controls">
+        <button type="button" class="btn secondary sm prev-page-btn" id="reportsPrevBtn" disabled>&laquo; Previous</button>
+        <button type="button" class="btn secondary sm next-page-btn" id="reportsNextBtn">Next &raquo;</button>
+      </div>
+    </div>
     {% else %}
     <p class="empty-table">No reports generated yet.</p>
     {% endif %}

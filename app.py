@@ -1143,8 +1143,9 @@ def ai_hr_reply():
 
 import subprocess
 try:
-    import imageio_ffmpeg
-    import speech_recognition as sr
+    import importlib
+    imageio_ffmpeg = importlib.import_module("imageio_ffmpeg")
+    sr = importlib.import_module("speech_recognition")
 except ImportError:
     imageio_ffmpeg = None
     sr = None

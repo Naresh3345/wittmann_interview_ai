@@ -1,12 +1,17 @@
 /**
- * Search Autocomplete & Table Filtering Module
+ * Search Autocomplete & Table Filtering & Pagination Module
  * Listens to live input on search bars (e.g. Search name, email, phone)
  * Displays a live autocomplete dropdown of matching words, names, emails, and phone numbers.
- * Dynamically filters corresponding table rows in real-time.
+ * Dynamically filters corresponding table rows and manages clean pagination.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
   const searchInputs = document.querySelectorAll(".search-autocomplete-input");
+  const PAGE_SIZE = 30;
+
+  // Initialize pagination for tables on page load
+  const allTables = document.querySelectorAll(".db-table, table");
+  allTables.forEach((tbl) => setupTablePagination(tbl));
 
   searchInputs.forEach((input) => {
     const wrapper = input.closest(".search-autocomplete-wrapper");
@@ -16,7 +21,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const clearBtn = wrapper.querySelector(".search-clear-btn");
     const targetTableId = input.dataset.targetTable;
 
-    // Locate target table: explicitly by ID, or nearby inside a card/page
     let targetTable = null;
     if (targetTableId) {
       targetTable = document.getElementById(targetTableId);
@@ -29,26 +33,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function filterTableAndBuildSuggestions(query) {
       const q = query.trim().toLowerCase();
-
-      // Find all target tables if multiple exist in container (e.g. database view)
       const tables = targetTableId 
         ? [document.getElementById(targetTableId)].filter(Boolean)
         : Array.from(document.querySelectorAll(".db-table, table"));
 
-      const suggestionsMap = new Map(); // key -> { value, category }
-      let totalMatchCount = 0;
+      const suggestionsMap = new Map();
 
       tables.forEach((tbl) => {
-        const rows = tbl.querySelectorAll("tbody tr");
+        const rows = Array.from(tbl.querySelectorAll("tbody tr"));
         const headers = Array.from(tbl.querySelectorAll("thead th")).map(th => th.textContent.trim().toLowerCase());
+
+        // Reset to page 1 on new search
+        tbl.dataset.currentPage = "1";
 
         rows.forEach((row) => {
           const text = row.textContent.toLowerCase();
           const matches = !q || text.includes(q);
-          row.style.display = matches ? "" : "none";
-          if (matches) totalMatchCount++;
+          row.dataset.searchMatch = matches ? "true" : "false";
 
-          if (q && q.length >= 1) {
+          if (matches && q && q.length >= 1) {
             const cells = Array.from(row.querySelectorAll("td"));
             cells.forEach((cell, idx) => {
               const val = cell.innerText.trim();
@@ -80,14 +83,14 @@ document.addEventListener("DOMContentLoaded", () => {
             });
           }
         });
+
+        renderTablePagination(tbl);
       });
 
-      // Update clear button visibility
       if (clearBtn) {
         clearBtn.style.display = q ? "inline-flex" : "none";
       }
 
-      // Render dropdown suggestions
       const suggestions = Array.from(suggestionsMap.values()).slice(0, 10);
       renderDropdown(suggestions, q);
     }
@@ -213,4 +216,66 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
   });
+
+  function setupTablePagination(table) {
+    table.dataset.currentPage = "1";
+    const card = table.closest(".db-table-card, section");
+    if (!card) return;
+
+    const prevBtn = card.querySelector(".prev-page-btn");
+    const nextBtn = card.querySelector(".next-page-btn");
+
+    if (prevBtn) {
+      prevBtn.addEventListener("click", () => {
+        let cur = parseInt(table.dataset.currentPage || "1", 10);
+        if (cur > 1) {
+          table.dataset.currentPage = String(cur - 1);
+          renderTablePagination(table);
+        }
+      });
+    }
+
+    if (nextBtn) {
+      nextBtn.addEventListener("click", () => {
+        let cur = parseInt(table.dataset.currentPage || "1", 10);
+        table.dataset.currentPage = String(cur + 1);
+        renderTablePagination(table);
+      });
+    }
+
+    renderTablePagination(table);
+  }
+
+  function renderTablePagination(table) {
+    const rows = Array.from(table.querySelectorAll("tbody tr"));
+    const matchingRows = rows.filter(r => r.dataset.searchMatch !== "false");
+    const totalMatches = matchingRows.length;
+    const totalPages = Math.max(Math.ceil(totalMatches / PAGE_SIZE), 1);
+
+    let currentPage = parseInt(table.dataset.currentPage || "1", 10);
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+    table.dataset.currentPage = String(currentPage);
+
+    const startIdx = (currentPage - 1) * PAGE_SIZE;
+    const endIdx = startIdx + PAGE_SIZE;
+
+    // Show/hide rows based on pagination
+    rows.forEach(r => r.style.display = "none");
+    const visiblePageRows = matchingRows.slice(startIdx, endIdx);
+    visiblePageRows.forEach(r => r.style.display = "");
+
+    // Update pagination status text
+    const card = table.closest(".db-table-card, section");
+    if (card) {
+      const textElem = card.querySelector(".pagination-text, #reportsPaginationText");
+      if (textElem) {
+        textElem.textContent = `Showing ${visiblePageRows.length} of ${totalMatches} candidates. Page ${currentPage} of ${totalPages}.`;
+      }
+      const prevBtn = card.querySelector(".prev-page-btn");
+      const nextBtn = card.querySelector(".next-page-btn");
+      if (prevBtn) prevBtn.disabled = currentPage <= 1;
+      if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+    }
+  }
 });

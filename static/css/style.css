@@ -2131,3 +2131,61 @@ video {
   flex-shrink: 0;
 }
 
+/* Table Pagination & Candidate Approval Bar Styles */
+.db-pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 14px 18px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.pagination-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: #334155;
+  font-weight: 500;
+  flex-wrap: wrap;
+}
+
+.pagination-badge {
+  background: #9d174d;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pagination-text {
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pagination-controls .btn {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+

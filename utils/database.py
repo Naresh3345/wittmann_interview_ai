@@ -12,7 +12,7 @@ from utils.ai_wrapper import ai_wrapper
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/wittmann_interview_ai"
+DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:5432/wittmann_interview_ai"
 DB_DSN = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
@@ -307,6 +307,22 @@ def init_db():
                 (slug, name),
             )
         seed_question_patterns(conn)
+        sync_all_table_sequences(conn)
+
+
+def sync_all_table_sequences(conn):
+    sequence_sync_queries = [
+        ("interview_questions", "assignment_id", "interview_questions_assignment_id_seq"),
+        ("users", "user_id", "users_user_id_seq"),
+        ("roles", "role_id", "roles_role_id_seq"),
+        ("question_bank", "question_id", "question_bank_question_id_seq"),
+        ("candidate_answers", "answer_id", "candidate_answers_answer_id_seq"),
+    ]
+    for table, col, seq in sequence_sync_queries:
+        try:
+            conn.execute(f"SELECT setval('{seq}', COALESCE((SELECT MAX({col}) FROM {table}), 1))")
+        except Exception:
+            pass
 
 
 def ensure_column(conn, table_name, column_name, column_definition):
