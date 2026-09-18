@@ -46,7 +46,17 @@
       <input id="candidate_degree" name="candidate_degree" value="{{ form_values.candidate_degree }}" placeholder="Example: B.Tech CSE" required>
 
       <label for="resume">Resume</label>
-      <input id="resume" name="resume" type="file" accept=".pdf,.docx,.txt" required>
+      <div class="resume-picker-control">
+        <input id="resume" name="resume" type="file" accept=".pdf,.docx,.txt,image/*" required style="display: none;">
+        <button type="button" class="btn secondary full resume-trigger-btn" id="resumeSourceTrigger">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span id="resumeChosenFileName">Choose File (Device, Camera, Google Drive)</span>
+        </button>
+      </div>
       <p class="form-hint" id="resumeParseStatus">Choose a resume after entering name, location, and degree.</p>
 
       <p class="form-hint">Email ID and phone number are auto-filled from the resume when possible.</p>
@@ -62,14 +72,92 @@
     </form>
   </section>
 </main>
+
+<!-- Resume Source Options Modal -->
+<div class="resume-modal-overlay" id="resumeSourceModal" hidden>
+  <div class="resume-modal-card">
+    <div class="resume-modal-header">
+      <h3>Select Resume Source</h3>
+      <button type="button" class="resume-modal-close" id="closeSourceModalBtn">&times;</button>
+    </div>
+    <p class="form-hint">Choose how you want to upload or attach the candidate resume:</p>
+    <div class="resume-source-options">
+      <button type="button" class="resume-source-btn" id="optionLocalFile">
+        <span class="source-icon">📁</span>
+        <div class="source-text">
+          <strong>Device File</strong>
+          <small>Select .pdf, .docx, or .txt from your computer</small>
+        </div>
+      </button>
+
+      <button type="button" class="resume-source-btn" id="optionCameraScan">
+        <span class="source-icon">📷</span>
+        <div class="source-text">
+          <strong>Take Photo / Camera Scan</strong>
+          <small>Snap a photo of the resume using your webcam</small>
+        </div>
+      </button>
+
+      <button type="button" class="resume-source-btn" id="optionGoogleDrive">
+        <span class="source-icon">☁️</span>
+        <div class="source-text">
+          <strong>Google Drive Link</strong>
+          <small>Paste a shared Google Drive file link</small>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Camera Document Scan Modal -->
+<div class="resume-modal-overlay" id="resumeCameraModal" hidden>
+  <div class="resume-modal-card camera-modal-card">
+    <div class="resume-modal-header">
+      <h3>Scan Resume via Camera</h3>
+      <button type="button" class="resume-modal-close" id="closeCameraModalBtn">&times;</button>
+    </div>
+    <div class="camera-scan-preview">
+      <video id="resumeCameraVideo" autoplay muted playsinline></video>
+      <canvas id="resumeCameraCanvas" width="640" height="480" hidden></canvas>
+    </div>
+    <p class="form-hint">Hold the resume document steady in front of your camera.</p>
+    <div class="resume-modal-actions">
+      <button type="button" class="btn primary" id="snapResumePhotoBtn">Snap Photo & Attach</button>
+      <button type="button" class="btn ghost" id="cancelCameraBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Google Drive Link Modal -->
+<div class="resume-modal-overlay" id="resumeDriveModal" hidden>
+  <div class="resume-modal-card">
+    <div class="resume-modal-header">
+      <h3>Attach from Google Drive</h3>
+      <button type="button" class="resume-modal-close" id="closeDriveModalBtn">&times;</button>
+    </div>
+    <div class="drive-link-form">
+      <label for="driveUrlInput">Google Drive Link</label>
+      <input type="url" id="driveUrlInput" placeholder="https://drive.google.com/file/d/.../view?usp=sharing">
+      <p class="form-hint">Ensure the link permissions are set to "Anyone with the link can view".</p>
+    </div>
+    <div class="resume-modal-actions">
+      <button type="button" class="btn primary" id="attachDriveLinkBtn">Fetch & Attach File</button>
+      <button type="button" class="btn ghost" id="cancelDriveBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <section class="features" id="features">
   <article><h3>Resume Upload</h3><p>The uploaded resume is stored under reports and linked with the candidate record.</p></article>
   <article><h3>Auto Extraction</h3><p>Name, email ID, and phone number are detected from PDF, DOCX, or TXT resumes.</p></article>
   <article><h3>Email Test Link</h3><p>The candidate receives a one-time test link at the extracted email address.</p></article>
   <article><h3>5 Minute Expiry</h3><p>If the test link is not opened within 5 minutes, it fails automatically.</p></article>
 </section>
+
 <script>
   const resumeInput = document.getElementById('resume');
+  const resumeSourceTrigger = document.getElementById('resumeSourceTrigger');
+  const resumeChosenFileName = document.getElementById('resumeChosenFileName');
   const candidateForm = document.getElementById('candidateForm');
   const nameInput = document.getElementById('name');
   const emailInput = document.getElementById('email');
@@ -78,6 +166,28 @@
   const degreeInput = document.getElementById('candidate_degree');
   const parseStatus = document.getElementById('resumeParseStatus');
   const phoneValidationHint = document.getElementById('phoneValidationHint');
+
+  // Modals
+  const sourceModal = document.getElementById('resumeSourceModal');
+  const closeSourceModalBtn = document.getElementById('closeSourceModalBtn');
+  const optionLocalFile = document.getElementById('optionLocalFile');
+  const optionCameraScan = document.getElementById('optionCameraScan');
+  const optionGoogleDrive = document.getElementById('optionGoogleDrive');
+
+  const cameraModal = document.getElementById('resumeCameraModal');
+  const closeCameraModalBtn = document.getElementById('closeCameraModalBtn');
+  const cancelCameraBtn = document.getElementById('cancelCameraBtn');
+  const resumeCameraVideo = document.getElementById('resumeCameraVideo');
+  const resumeCameraCanvas = document.getElementById('resumeCameraCanvas');
+  const snapResumePhotoBtn = document.getElementById('snapResumePhotoBtn');
+  let cameraStream = null;
+
+  const driveModal = document.getElementById('resumeDriveModal');
+  const closeDriveModalBtn = document.getElementById('closeDriveModalBtn');
+  const cancelDriveBtn = document.getElementById('cancelDriveBtn');
+  const driveUrlInput = document.getElementById('driveUrlInput');
+  const attachDriveLinkBtn = document.getElementById('attachDriveLinkBtn');
+
   let parsedCurrentFile = false;
 
   function normalizePhoneInput() {
@@ -92,9 +202,114 @@
 
   phoneInput?.addEventListener('input', normalizePhoneInput);
 
+  // Trigger modal on Choose File button click
+  resumeSourceTrigger?.addEventListener('click', () => {
+    sourceModal.hidden = false;
+  });
+
+  closeSourceModalBtn?.addEventListener('click', () => {
+    sourceModal.hidden = true;
+  });
+
+  // Option 1: Device File
+  optionLocalFile?.addEventListener('click', () => {
+    sourceModal.hidden = true;
+    resumeInput.click();
+  });
+
+  // Option 2: Camera Photo Scan
+  optionCameraScan?.addEventListener('click', async () => {
+    sourceModal.hidden = true;
+    cameraModal.hidden = false;
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 960 } },
+        audio: false
+      });
+      resumeCameraVideo.srcObject = cameraStream;
+    } catch (err) {
+      alert('Camera access denied or unavailable: ' + err.message);
+      stopCameraStream();
+      cameraModal.hidden = true;
+    }
+  });
+
+  function stopCameraStream() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+  }
+
+  closeCameraModalBtn?.addEventListener('click', () => {
+    stopCameraStream();
+    cameraModal.hidden = true;
+  });
+
+  cancelCameraBtn?.addEventListener('click', () => {
+    stopCameraStream();
+    cameraModal.hidden = true;
+  });
+
+  snapResumePhotoBtn?.addEventListener('click', async () => {
+    const ctx = resumeCameraCanvas.getContext('2d');
+    ctx.drawImage(resumeCameraVideo, 0, 0, resumeCameraCanvas.width, resumeCameraCanvas.height);
+    stopCameraStream();
+    cameraModal.hidden = true;
+
+    resumeCameraCanvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], 'resume_photo_scan.jpg', { type: 'image/jpeg' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      resumeInput.files = dt.files;
+      resumeChosenFileName.textContent = '📷 resume_photo_scan.jpg';
+      parsedCurrentFile = false;
+      await parseSelectedResume();
+    }, 'image/jpeg', 0.88);
+  });
+
+  // Option 3: Google Drive Link
+  optionGoogleDrive?.addEventListener('click', () => {
+    sourceModal.hidden = true;
+    driveModal.hidden = false;
+  });
+
+  closeDriveModalBtn?.addEventListener('click', () => {
+    driveModal.hidden = true;
+  });
+
+  cancelDriveBtn?.addEventListener('click', () => {
+    driveModal.hidden = true;
+  });
+
+  attachDriveLinkBtn?.addEventListener('click', async () => {
+    const url = driveUrlInput.value.trim();
+    if (!url || !url.includes('drive.google.com')) {
+      alert('Please enter a valid Google Drive URL.');
+      return;
+    }
+    driveModal.hidden = true;
+    parseStatus.textContent = 'Linking Google Drive file...';
+
+    // Create virtual TXT file referencing the Google Drive Link
+    const driveContent = `Google Drive Resume Link:\n${url}\nCandidate Location: ${locationInput.value.trim()}`;
+    const file = new File([driveContent], 'google_drive_resume.txt', { type: 'text/plain' });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    resumeInput.files = dt.files;
+    resumeChosenFileName.textContent = '☁️ Google Drive Link attached';
+    parsedCurrentFile = false;
+    await parseSelectedResume();
+  });
+
   async function parseSelectedResume() {
     const file = resumeInput.files?.[0];
     if (!file) return false;
+
+    if (resumeChosenFileName && file.name) {
+      resumeChosenFileName.textContent = file.name;
+    }
 
     parseStatus.textContent = 'Reading resume details...';
     const formData = new FormData();

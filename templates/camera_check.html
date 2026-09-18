@@ -41,7 +41,7 @@
 
     <form method="post" id="cameraCheckForm">
       <input type="hidden" name="profile_photo" id="profilePhotoInput">
-      <button class="btn primary full" id="startAptitudeButton" type="submit" disabled>Start Aptitude Test</button>
+      <button class="btn primary full" id="startAptitudeButton" type="submit" disabled>Start Test</button>
     </form>
     <button class="btn ghost full" id="retryCameraCheckButton" type="button">Test Camera Again</button>
     <p class="form-hint warning-text">Screenshots and screen recording are not permitted during camera verification.</p>
@@ -51,8 +51,9 @@
 <div class="success-popup" id="cameraSuccessPopup" hidden>
   <div class="success-tick" aria-hidden="true"></div>
   <strong>Tested OK</strong>
-  <p>You can start the aptitude test now.</p>
+  <p>You can start the test now.</p>
 </div>
+
 
 <script>
   const video = document.getElementById('cameraCheckVideo');
@@ -160,10 +161,11 @@
     checkList.innerHTML = '';
     successPopup.hidden = true;
     startButton.disabled = true;
-    startButton.textContent = 'Start Aptitude Test';
+    startButton.textContent = 'Start Test';
     browserCameraGuide.hidden = true;
     lanCameraGuide.hidden = true;
     setCentered(false, 'Testing camera and face position...');
+
 
     if (!navigator.mediaDevices?.getUserMedia) {
       addCheck('Camera API is available', false);
@@ -227,13 +229,14 @@
       if (centeredFrames >= 1) {
         addCheck('Camera face test completed OK', true);
         profilePhotoInput.value = captureFrameDataUrl();
-        setCentered(true, 'Tested OK. You can start the aptitude test.');
+        setCentered(true, 'Tested OK. You can start the test.');
         successPopup.hidden = false;
         startButton.disabled = false;
         startButton.focus();
         setTimeout(() => { successPopup.hidden = true; }, 3500);
         return;
       }
+
     }
 
     if (token === checkToken) {

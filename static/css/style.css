@@ -2188,4 +2188,176 @@ video {
   font-size: 13px;
 }
 
+/* Resume Upload Source Modal & Camera/Drive Picker Styles */
+.resume-picker-control {
+  margin-bottom: 8px;
+}
+
+.resume-trigger-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #f8fafc;
+  border: 1.5px dashed #cbd5e1;
+  color: #334155;
+  padding: 12px 16px;
+  font-weight: 600;
+  border-radius: 10px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  text-align: center;
+}
+
+.resume-trigger-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.resume-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.resume-modal-overlay[hidden] {
+  display: none;
+}
+
+.resume-modal-card {
+  background: #ffffff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  padding: 24px;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.25);
+  animation: modalFadeIn 0.2s ease-out;
+}
+
+.camera-modal-card {
+  max-width: 580px;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.resume-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.resume-modal-header h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.resume-modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.resume-modal-close:hover {
+  color: #0f172a;
+}
+
+.resume-source-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.resume-source-btn {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  width: 100%;
+}
+
+.resume-source-btn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+.source-icon {
+  font-size: 26px;
+  flex-shrink: 0;
+}
+
+.source-text strong {
+  display: block;
+  font-size: 15px;
+  color: #0f172a;
+}
+
+.source-text small {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.camera-scan-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/3;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 14px 0;
+}
+
+.camera-scan-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.drive-link-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.drive-link-form input {
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.resume-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+
 
