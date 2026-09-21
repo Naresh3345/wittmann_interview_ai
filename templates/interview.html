@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
+{% set active_sections = [] %}
+{% if enabled_sections.Aptitude %}{% set _ = active_sections.append("Aptitude") %}{% endif %}
+{% if enabled_sections.Programming %}{% set _ = active_sections.append("Programming") %}{% endif %}
+{% if enabled_sections["AI Interview"] %}{% set _ = active_sections.append("AI Interview") %}{% endif %}
 <main class="interview-layout">
   <aside class="camera-panel">
     <h2>Candidate Monitor</h2>
@@ -75,7 +79,7 @@
       <section class="section-launcher" id="sectionLauncher">
         {% if enabled_sections.Aptitude %}
         <article class="test-section-card">
-          <p class="eyebrow">Section 1</p>
+          <p class="eyebrow">Section {{ active_sections.index("Aptitude") + 1 if "Aptitude" in active_sections else 1 }}</p>
           <h2>Aptitude</h2>
           <p>Logical Reasoning, Verbal Ability, Programming Aptitude, and role-related aptitude.</p>
           <button class="btn primary" type="button" data-start-section="Aptitude">Start Aptitude Test</button>
@@ -83,7 +87,7 @@
         {% endif %}
         {% if enabled_sections.Programming %}
         <article class="test-section-card locked" id="programmingLauncher">
-          <p class="eyebrow">Section {{ 2 if enabled_sections.Aptitude else 1 }}</p>
+          <p class="eyebrow">Section {{ active_sections.index("Programming") + 1 if "Programming" in active_sections else 1 }}</p>
           <h2>Programming</h2>
           <p>{{ "Programming questions open after you finish Aptitude." if enabled_sections.Aptitude else "Compiler-style programming output questions." }}</p>
           <button class="btn primary" type="button" data-start-section="Programming" {{ "disabled" if enabled_sections.Aptitude else "" }}>{{ "Locked" if enabled_sections.Aptitude else "Start Programming" }}</button>
@@ -91,38 +95,39 @@
         {% endif %}
         {% if enabled_sections["AI Interview"] %}
         <article class="test-section-card locked" id="aiInterviewLauncher">
-          <p class="eyebrow">Round 3</p>
-          <h2>Round 3: AI Interview</h2>
+          <p class="eyebrow">Section {{ active_sections.index("AI Interview") + 1 if "AI Interview" in active_sections else 1 }}</p>
+          <h2>Section {{ active_sections.index("AI Interview") + 1 if "AI Interview" in active_sections else 1 }}: AI Interview</h2>
           <p>Interactive AI Interviewer round with live voice synthesis, spoken answer transcription, and empathetic guidance.</p>
-          <button class="btn primary" type="button" id="startAiInterviewLauncher" {{ "disabled" if enabled_sections.Aptitude or enabled_sections.Programming else "" }}>{{ "Locked" if enabled_sections.Aptitude or enabled_sections.Programming else "Start Round 3: AI Interview" }}</button>
+          <button class="btn primary" type="button" id="startAiInterviewLauncher" {{ "disabled" if enabled_sections.Aptitude or enabled_sections.Programming else "" }}>{{ "Locked" if enabled_sections.Aptitude or enabled_sections.Programming else "Start Section " ~ (active_sections.index("AI Interview") + 1 if "AI Interview" in active_sections else 1) ~ ": AI Interview" }}</button>
         </article>
         {% endif %}
       </section>
 
       <section class="section-transition" id="programmingTransition" hidden>
         <div>
-          <p class="eyebrow">Round 1 Aptitude Completed</p>
-          <h2>Continue to Round 2: Programming</h2>
+          <p class="eyebrow">Aptitude Section Completed</p>
+          <h2>Continue to Section {{ active_sections.index("Programming") + 1 if "Programming" in active_sections else 2 }}: Programming</h2>
           <p>The Aptitude section is closed. Start the Programming section when you are ready.</p>
         </div>
-        <button class="btn primary" id="startProgrammingButton" type="button">Start Round 2 Programming</button>
+        <button class="btn primary" id="startProgrammingButton" type="button">Start Section {{ active_sections.index("Programming") + 1 if "Programming" in active_sections else 2 }} Programming</button>
       </section>
 
       <section class="section-transition" id="aiInterviewTransition" hidden>
         <div>
-          <p class="eyebrow">Technical Rounds Completed</p>
-          <h2>Continue to Round 3: AI Interview</h2>
+          <p class="eyebrow">Technical Sections Completed</p>
+          <h2>Continue to Section {{ active_sections.index("AI Interview") + 1 if "AI Interview" in active_sections else 3 }}: AI Interview</h2>
           <p>The AI Interviewer will conduct a warm, interactive conversation with up to 15 role-related questions.</p>
         </div>
-        <button class="btn primary" id="startAiInterviewButton" type="button">Start Round 3: AI Interview</button>
+        <button class="btn primary" id="startAiInterviewButton" type="button">Start Section {{ active_sections.index("AI Interview") + 1 if "AI Interview" in active_sections else 3 }}: AI Interview</button>
       </section>
 
       <section class="ai-interview-panel" id="aiInterviewPanel" hidden>
         <div class="round-badge-bar">
-          <span class="round-chip">Round 3 of 3</span>
+          <span class="round-chip">Section {{ active_sections.index("AI Interview") + 1 if "AI Interview" in active_sections else 1 }} of {{ active_sections|length }}</span>
           <strong>WITTMANN Executive AI Interview</strong>
           <span id="aiEmotionBadge" class="emotion-badge warm">Attentive & Professional</span>
         </div>
+
 
         <div class="ai-bot-card studio-card">
           <div class="ai-hr-portrait-wrap">
@@ -196,8 +201,9 @@
       {% set ns.current_category = q.category %}
       {% set ns.section_index = 0 %}
       <section class="section-divider test-section" data-section="{{ q.category }}" hidden>
-        <p class="eyebrow">Section {{ 1 if q.category == 'Aptitude' else 2 }}</p>
-        <h2>{{ q.category }} Round</h2>
+        <p class="eyebrow">Section {{ active_sections.index(q.category) + 1 if q.category in active_sections else 1 }}</p>
+        <h2>{{ q.category }} Section</h2>
+
         {% if q.category == 'Aptitude' %}
         <p>Logical Reasoning, Verbal Ability, Programming Aptitude, and role-related aptitude.</p>
         {% else %}

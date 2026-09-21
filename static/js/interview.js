@@ -124,7 +124,9 @@ const isInsecurePublicTunnel = isTryCloudflare && location.protocol === 'http:';
 const lanOrigin = isInsecurePublicTunnel ? secureOrigin : location.origin;
 
 function aiPerQuestionSeconds() {
-  return 40;
+  const totalSeconds = Number(sectionDurations['AI Interview']) || (25 * 60);
+  const qCount = Math.max(aiInterviewQuestions.length, 1);
+  return Math.max(Math.floor(totalSeconds / qCount), 15);
 }
 
 if (isInsecurePublicTunnel) {

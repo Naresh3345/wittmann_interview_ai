@@ -115,6 +115,7 @@ def generate_pdf_report(candidate_name: str, results: list, face_summary: dict, 
         "TableHeader",
         parent=table_cell_style,
         fontName="Helvetica-Bold",
+        textColor=colors.white,
         alignment=1,
         leading=10,
     )

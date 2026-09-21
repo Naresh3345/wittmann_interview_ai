@@ -1018,13 +1018,22 @@ def interview():
             allowed_question_sets=allowed_question_sets,
             total_paper_marks=total_paper_marks,
         )
+        proctoring_settings = get_proctoring_settings()
+        global_aptitude = bool(proctoring_settings.get("aptitude_round_enabled", True)) if proctoring_settings else True
+        global_programming = bool(proctoring_settings.get("programming_round_enabled", True)) if proctoring_settings else True
+        global_ai = bool(proctoring_settings.get("ai_interview_round_enabled", True)) if proctoring_settings else True
+
+        effective_aptitude = aptitude_enabled and global_aptitude
+        effective_programming = programming_enabled and global_programming
+        effective_ai = ai_interview_enabled and global_ai
+
         enabled_question_sections = []
-        if aptitude_enabled:
+        if effective_aptitude:
             enabled_question_sections.append("Aptitude")
-        if programming_enabled:
+        if effective_programming:
             enabled_question_sections.append("Programming")
         questions = [question for question in questions if question.get("category") in enabled_question_sections]
-        if not questions and not ai_interview_enabled:
+        if not questions and not effective_ai:
             raise ValueError("This role has no enabled interview sections. Enable at least one section in the HR portal.")
     except ValueError as exc:
         session.pop("role_id", None)
@@ -1034,16 +1043,15 @@ def interview():
         session["role_error_message"] = str(exc)
         return redirect(url_for("select_role", role_error="paper"))
     save_interview_questions(interview_id, questions)
-    proctoring_settings = get_proctoring_settings()
     section_durations = {
         "Aptitude": max(int(aptitude_minutes or 20), 1) * 60,
         "Programming": max(int(programming_minutes or 20), 1) * 60,
         "AI Interview": max(int(ai_interview_minutes or 25), 1) * 60,
     }
     enabled_sections = {
-        "Aptitude": aptitude_enabled,
-        "Programming": programming_enabled,
-        "AI Interview": ai_interview_enabled,
+        "Aptitude": effective_aptitude,
+        "Programming": effective_programming,
+        "AI Interview": effective_ai,
     }
     ai_interview_questions = ai_question_texts_from_bank(
         role_slug,
@@ -1367,7 +1375,7 @@ def submit_interview():
     report_path = generate_pdf_report(candidate_name, results, face_summary, str(REPORT_DIR), ai_turns=ai_turns)
     session["last_report"] = report_path
     if interview_id:
-        complete_interview(interview_id, earned_marks, report_path, shortlist_status, shortlist_reason)
+        complete_interview(interview_id, earned_marks, report_path, shortlist_status, shortlist_reason, proctoring_violations=proctoring_violations)
 
     completion = {
         "status": "rejected" if rejected else "submitted",
@@ -1382,6 +1390,41 @@ def submit_interview():
     }
     session["completion_result"] = completion
     return jsonify({"submitted": True, "redirect_url": url_for("interview_result"), **completion})
+
+
+@app.route("/api/log-warning", methods=["POST"])
+def log_warning():
+    payload = request.get_json(force=True) or {}
+    interview_id = session.get("interview_id") or payload.get("interview_id")
+    if not interview_id:
+        return jsonify({"logged": False, "error": "No active interview session"}), 400
+    violation = {
+        "kind": payload.get("kind", "warning"),
+        "detail": payload.get("detail", "Suspicious activity detected"),
+        "timestamp": payload.get("timestamp") or datetime.now().isoformat(),
+    }
+    current = []
+    with get_db() as conn:
+        ensure_column(conn, "interviews", "proctoring_violations", "JSONB DEFAULT '[]'::jsonb")
+        ensure_column(conn, "interviews", "warning_count", "INTEGER DEFAULT 0")
+        row = conn.execute("SELECT proctoring_violations, warning_count FROM interviews WHERE interview_id = %s", (str(interview_id),)).fetchone()
+        if row:
+            current = row.get("proctoring_violations") or []
+            if isinstance(current, str):
+                try:
+                    current = json.loads(current)
+                except Exception:
+                    current = []
+            current.append(violation)
+            conn.execute(
+                """
+                UPDATE interviews
+                SET proctoring_violations = %s, warning_count = %s
+                WHERE interview_id = %s
+                """,
+                (Jsonb(current), len(current), str(interview_id)),
+            )
+    return jsonify({"logged": True, "warning_count": len(current)})
 
 
 @app.route("/api/ai-interview-report", methods=["POST"])

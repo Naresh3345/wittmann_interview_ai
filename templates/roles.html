@@ -13,10 +13,15 @@
       <input type="radio" name="role_id" value="{{ role.role_id }}" required>
       <span>{{ role.role_name }}</span>
       <small>
-        {% if role.aptitude_enabled %}Section 1: Aptitude{% endif %}
-        {% if role.programming_enabled %}{{ " | " if role.aptitude_enabled else "" }}Section {{ 2 if role.aptitude_enabled else 1 }}: Programming{% endif %}
-        {% if role.ai_interview_enabled %} | Section {{ 3 if role.aptitude_enabled and role.programming_enabled else (2 if role.aptitude_enabled or role.programming_enabled else 1) }}: AI Interview{% endif %}
+        {% set enabled_labels = [] %}
+        {% if role.aptitude_enabled %}{% set _ = enabled_labels.append("Aptitude") %}{% endif %}
+        {% if role.programming_enabled %}{% set _ = enabled_labels.append("Programming") %}{% endif %}
+        {% if role.ai_interview_enabled %}{% set _ = enabled_labels.append("AI Interview") %}{% endif %}
+        {% for label in enabled_labels %}
+          Section {{ loop.index }}: {{ label }}{{ " | " if not loop.last else "" }}
+        {% endfor %}
       </small>
+
       <small>Question set: {{ role.allowed_question_sets or "All available sets" }}</small>
       {% if role.ai_interview_enabled %}
       <small>AI Interview: up to {{ role.ai_interview_max_questions or 15 }} questions / {{ role.ai_interview_minutes or 25 }} minutes</small>

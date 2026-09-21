@@ -279,6 +279,8 @@ def init_db():
         ensure_column(conn, "interviews", "current_section", "TEXT")
         ensure_column(conn, "interviews", "current_question_number", "INTEGER")
         ensure_column(conn, "interviews", "current_question_text", "TEXT")
+        ensure_column(conn, "interviews", "proctoring_violations", "JSONB DEFAULT '[]'::jsonb")
+        ensure_column(conn, "interviews", "warning_count", "INTEGER DEFAULT 0")
         ensure_proctoring_settings_table(conn)
         conn.execute(
             """
@@ -361,6 +363,9 @@ def ensure_proctoring_settings_table(conn):
     ensure_column(conn, "proctoring_settings", "focus_warning_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
     ensure_column(conn, "proctoring_settings", "camera_warning_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
     ensure_column(conn, "proctoring_settings", "multiple_face_warning_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
+    ensure_column(conn, "proctoring_settings", "aptitude_round_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
+    ensure_column(conn, "proctoring_settings", "programming_round_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
+    ensure_column(conn, "proctoring_settings", "ai_interview_round_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
     ensure_column(conn, "proctoring_settings", "tab_switch_limit", "INTEGER NOT NULL DEFAULT 5")
     ensure_column(conn, "proctoring_settings", "warning_limit", "INTEGER NOT NULL DEFAULT 10")
     ensure_column(conn, "proctoring_settings", "updated_at", "TIMESTAMPTZ NOT NULL DEFAULT now()")
@@ -584,7 +589,7 @@ def load_interview_questions(interview_id):
     return [row["question_snapshot_json"] for row in rows]
 
 
-def complete_interview(interview_id, total_score, report_path, shortlist_status, shortlist_reason):
+def complete_interview(interview_id, total_score, report_path, shortlist_status, shortlist_reason, proctoring_violations=None):
     now = datetime.now()
     with get_db() as conn:
         ensure_column(conn, "interviews", "interview_completed_at", "TIMESTAMPTZ")
@@ -592,23 +597,50 @@ def complete_interview(interview_id, total_score, report_path, shortlist_status,
         ensure_column(conn, "interviews", "current_section", "TEXT")
         ensure_column(conn, "interviews", "current_question_number", "INTEGER")
         ensure_column(conn, "interviews", "current_question_text", "TEXT")
-        conn.execute(
-            """
-            UPDATE interviews
-            SET total_score = %s,
-                status = %s,
-                report_path = %s,
-                shortlist_status = %s,
-                shortlist_reason = %s,
-                interview_completed_at = %s,
-                last_activity_at = %s,
-                current_section = NULL,
-                current_question_number = NULL,
-                current_question_text = NULL
-            WHERE interview_id = %s
-            """,
-            (total_score, "Completed", report_path, shortlist_status, shortlist_reason, now, now, interview_id),
-        )
+        ensure_column(conn, "interviews", "proctoring_violations", "JSONB DEFAULT '[]'::jsonb")
+        ensure_column(conn, "interviews", "warning_count", "INTEGER DEFAULT 0")
+
+        violations_val = Jsonb(proctoring_violations) if proctoring_violations is not None else None
+        warning_cnt = len(proctoring_violations) if proctoring_violations is not None else None
+
+        if violations_val is not None:
+            conn.execute(
+                """
+                UPDATE interviews
+                SET total_score = %s,
+                    status = %s,
+                    report_path = %s,
+                    shortlist_status = %s,
+                    shortlist_reason = %s,
+                    interview_completed_at = %s,
+                    last_activity_at = %s,
+                    proctoring_violations = %s,
+                    warning_count = %s,
+                    current_section = NULL,
+                    current_question_number = NULL,
+                    current_question_text = NULL
+                WHERE interview_id = %s
+                """,
+                (total_score, "Completed", report_path, shortlist_status, shortlist_reason, now, now, violations_val, warning_cnt, interview_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE interviews
+                SET total_score = %s,
+                    status = %s,
+                    report_path = %s,
+                    shortlist_status = %s,
+                    shortlist_reason = %s,
+                    interview_completed_at = %s,
+                    last_activity_at = %s,
+                    current_section = NULL,
+                    current_question_number = NULL,
+                    current_question_text = NULL
+                WHERE interview_id = %s
+                """,
+                (total_score, "Completed", report_path, shortlist_status, shortlist_reason, now, now, interview_id),
+            )
 
 
 def save_ai_interview_report(interview_id, turns, report_path):
