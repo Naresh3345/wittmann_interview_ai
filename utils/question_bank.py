@@ -66,6 +66,161 @@ def ensure_question_bank_indexes():
             "CREATE INDEX IF NOT EXISTS question_bank_role_set_section_active_idx ON question_bank (role_slug, question_set, section, active)"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS question_bank_role_topic_idx ON question_bank (role_slug, topic)")
+    sync_ai_questions_across_all_sets()
+
+
+def generate_fallback_ai_questions(role_name, max_questions=15):
+    role_label = role_name or "the selected role"
+    templates = [
+        "Please introduce yourself and highlight your educational background and technical experience relevant to {role}.",
+        "What specific skills, tools, or domain knowledge make you a strong candidate for the {role} position at WITTMANN?",
+        "Describe a recent project or technical task related to {role} that you completed successfully.",
+        "Walk me through a challenging problem or bug you encountered in {role} and how you diagnosed and resolved it.",
+        "How do you ensure high quality, reliability, and precision in your work as a {role}?",
+        "What attracted you to WITTMANN BATTENFELD India and our industrial technology products?",
+        "How do you manage your time and prioritize tasks when faced with multiple urgent deadlines in {role}?",
+        "Tell me about a situation where you had to learn a new tool, technology, or framework quickly for {role}.",
+        "Describe a scenario where a mistake or unexpected issue occurred in your project. How did you handle it and what did you learn?",
+        "How do you effectively communicate technical details or progress updates to team members and managers?",
+        "Tell me about a time you collaborated with a cross-functional team to achieve a shared objective in {role}.",
+        "How do you handle constructive feedback or critical reviews of your work?",
+        "What are your key goals and expected contributions during your first 90 days as a {role} at WITTMANN?",
+        "What are your expectations regarding work location, shift flexibility, and career growth for {role}?",
+        "Do you have any specific questions for us regarding the {role} team, culture, or technology stack at WITTMANN?",
+    ]
+    count = min(max(int(max_questions or 15), 1), 15)
+    return [item.format(role=role_label) for item in templates[:count]]
+
+
+def sync_ai_questions_across_all_sets():
+    now = datetime.now()
+    standard_sets = ["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]
+    ai_sections = ["AI Interview", "AI HR Interview", "HR Interview", "AI Interview Round"]
+
+    with get_db() as conn:
+        roles = conn.execute("SELECT DISTINCT role_slug FROM question_bank WHERE deleted_at IS NULL").fetchall()
+        role_slugs = {row["role_slug"] for row in roles if row.get("role_slug")}
+
+        for role_slug in role_slugs:
+            set_rows = conn.execute(
+                """
+                SELECT DISTINCT question_set
+                FROM question_bank
+                WHERE role_slug = %s AND deleted_at IS NULL
+                """,
+                (role_slug,),
+            ).fetchall()
+            existing_sets = {row["question_set"] for row in set_rows if row.get("question_set")}
+            all_sets_for_role = list(existing_sets.union(standard_sets))
+
+            source_ai_questions = conn.execute(
+                """
+                SELECT *
+                FROM question_bank
+                WHERE role_slug = %s
+                  AND section = ANY(%s)
+                  AND active = TRUE
+                  AND deleted_at IS NULL
+                ORDER BY question_id ASC
+                """,
+                (role_slug, ai_sections),
+            ).fetchall()
+            source_ai_questions = list(source_ai_questions)
+
+            if not source_ai_questions:
+                role_row = conn.execute("SELECT role_name FROM roles WHERE role_slug = %s", (role_slug,)).fetchone()
+                role_name = role_row["role_name"] if role_row else role_slug.replace("-", " ").title()
+                default_texts = generate_fallback_ai_questions(role_name, 15)
+                source_ai_questions = []
+                for idx, qtext in enumerate(default_texts, start=1):
+                    source_ai_questions.append({
+                        "question_code": f"AI-{role_slug.upper()}-Q{idx:02d}",
+                        "role_slug": role_slug,
+                        "question_set": "Set 1",
+                        "section": "AI Interview Round",
+                        "topic": "General AI Interview",
+                        "difficulty": "Medium",
+                        "question_text": qtext,
+                        "options": [],
+                        "correct_answer": "Demonstrate relevant experience, problem solving, clear communication, and role alignment.",
+                        "keywords": [role_slug, "ai interview"],
+                        "marks": 5,
+                    })
+
+            for target_set in all_sets_for_role:
+                count_row = conn.execute(
+                    """
+                    SELECT COUNT(*) as cnt
+                    FROM question_bank
+                    WHERE role_slug = %s
+                      AND question_set = %s
+                      AND section = ANY(%s)
+                      AND active = TRUE
+                      AND deleted_at IS NULL
+                    """,
+                    (role_slug, target_set, ai_sections),
+                ).fetchone()
+                count = count_row["cnt"] if count_row else 0
+
+                if count < 15:
+                    existing_q_rows = conn.execute(
+                        """
+                        SELECT question_text
+                        FROM question_bank
+                        WHERE role_slug = %s
+                          AND question_set = %s
+                          AND section = ANY(%s)
+                          AND active = TRUE
+                          AND deleted_at IS NULL
+                        """,
+                        (role_slug, target_set, ai_sections),
+                    ).fetchall()
+                    existing_texts = {r["question_text"].strip() for r in existing_q_rows if r.get("question_text")}
+
+                    set_tag = "".join(ch for ch in target_set if ch.isalnum()).upper()
+
+                    for idx, sq in enumerate(source_ai_questions, start=1):
+                        qtext = (sq.get("question_text") or "").strip()
+                        if not qtext or qtext in existing_texts:
+                            continue
+                        code = f"AI-{role_slug.upper()}-{set_tag}-Q{idx:02d}"
+                        conn.execute(
+                            """
+                            INSERT INTO question_bank
+                                (question_code, role_slug, question_set, section, topic, difficulty,
+                                 question_text, options, correct_answer, keywords, marks, active, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s)
+                            ON CONFLICT (question_code) DO UPDATE SET
+                                role_slug = EXCLUDED.role_slug,
+                                question_set = EXCLUDED.question_set,
+                                section = EXCLUDED.section,
+                                topic = EXCLUDED.topic,
+                                difficulty = EXCLUDED.difficulty,
+                                question_text = EXCLUDED.question_text,
+                                options = EXCLUDED.options,
+                                correct_answer = EXCLUDED.correct_answer,
+                                keywords = EXCLUDED.keywords,
+                                marks = EXCLUDED.marks,
+                                active = TRUE,
+                                updated_at = EXCLUDED.updated_at
+                            """,
+                            (
+                                code,
+                                role_slug,
+                                target_set,
+                                sq.get("section") or "AI Interview Round",
+                                sq.get("topic") or "AI Interview",
+                                sq.get("difficulty") or "Medium",
+                                qtext,
+                                Jsonb(sq.get("options") or []),
+                                sq.get("correct_answer") or "Demonstrate relevant experience, problem solving, clear communication, and role alignment.",
+                                Jsonb(sq.get("keywords") or []),
+                                sq.get("marks") or 5,
+                                now,
+                                now,
+                            ),
+                        )
+                        existing_texts.add(qtext)
 
 
 def normalize_question(row):
