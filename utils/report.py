@@ -29,7 +29,10 @@ UNICODE_FONT = _register_unicode_font()
 
 
 def _paragraph(value, style):
-    return Paragraph(escape(str(value or "")).replace("\n", "<br/>"), style)
+    text = escape(str(value or "")).replace("\n", "<br/>")
+    if getattr(style, "textColor", None) == colors.white or getattr(style, "name", "") == "TableHeader":
+        text = f'<font color="#ffffff"><b>{text}</b></font>'
+    return Paragraph(text, style)
 
 
 def _escaped_lines(value):

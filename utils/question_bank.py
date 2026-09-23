@@ -266,6 +266,22 @@ def select_ai_interview_questions(role_slug, max_questions=15, allowed_question_
             """,
             tuple(params),
         ).fetchall()
+        rows = list(rows)
+        if len(rows) < limit and question_sets:
+            existing_ids = [item["question_id"] for item in rows]
+            extra_rows = conn.execute(
+                """
+                SELECT *
+                FROM question_bank
+                WHERE role_slug = %s
+                  AND section IN ('AI Interview', 'AI HR Interview', 'HR Interview')
+                  AND active = TRUE
+                  AND deleted_at IS NULL
+                  AND question_id <> ALL(%s)
+                """,
+                (role_slug, existing_ids if existing_ids else [-1]),
+            ).fetchall()
+            rows.extend(extra_rows)
         chosen = choose_least_assigned(rows, min(limit, len(rows))) if rows else []
         if chosen:
             conn.execute(

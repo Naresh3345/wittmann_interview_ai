@@ -63,6 +63,8 @@ from utils.database import (
     save_interview_questions,
     update_interview_progress,
 )
+from utils.database import get_db
+from psycopg.types.json import Jsonb
 from utils.question_bank import ensure_question_bank_indexes, select_ai_interview_questions, select_questions_for_role
 from utils.report import generate_ai_interview_report, generate_pdf_report
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -1074,10 +1076,75 @@ def interview():
     )
 
 
+def finalize_inactive_interviews():
+    now = datetime.now()
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT i.interview_id, i.user_id, u.name, i.status
+                FROM interviews i
+                JOIN users u ON i.user_id = u.user_id
+                WHERE i.last_left_at IS NOT NULL
+                  AND i.last_left_at <= %s - INTERVAL '60 seconds'
+                  AND i.status NOT IN ('Completed', 'Auto Submitted')
+                """,
+                (now,),
+            ).fetchall()
+            for row in rows:
+                iid = row["interview_id"]
+                reason = "Tab closed for over 1 minute. Interview auto completed."
+                try:
+                    submit_interview_record(iid, auto_submit_reason=reason)
+                except Exception:
+                    conn.execute(
+                        "UPDATE interviews SET status = 'Completed', shortlist_reason = %s, interview_completed_at = %s WHERE interview_id = %s",
+                        (reason, now, iid),
+                    )
+    except Exception:
+        pass
+
+
+@app.route("/api/candidate-leave", methods=["POST"])
+def candidate_leave():
+    payload = request.get_json(silent=True) or {}
+    interview_id = session.get("interview_id") or payload.get("interview_id")
+    if not interview_id:
+        return jsonify({"status": "ignored"}), 200
+
+    action = payload.get("status", "left")
+    now = datetime.now()
+    try:
+        with get_db() as conn:
+            if action == "left":
+                conn.execute(
+                    """
+                    UPDATE interviews
+                    SET last_left_at = %s
+                    WHERE interview_id = %s
+                      AND status NOT IN ('Completed', 'Auto Submitted')
+                    """,
+                    (now, interview_id),
+                )
+            elif action == "returned":
+                conn.execute(
+                    """
+                    UPDATE interviews
+                    SET last_left_at = NULL
+                    WHERE interview_id = %s
+                    """,
+                    (interview_id,),
+                )
+    except Exception:
+        pass
+    return jsonify({"status": "ok"}), 200
+
+
 @app.route("/admin/database")
 def admin_database():
     if not admin_key_is_valid():
         return "Admin access required. Add ?key=admin123 to the URL or set ADMIN_REPORT_KEY in .env.", 403
+    finalize_inactive_interviews()
     return render_template(
         "database.html",
         tables=load_database_snapshot(),
@@ -1090,12 +1157,14 @@ def admin_database():
 def admin_reports():
     if not admin_key_is_valid():
         return "Admin access required. Add ?key=admin123 to the URL or set ADMIN_REPORT_KEY in .env.", 403
+    finalize_inactive_interviews()
     return render_template(
         "admin_reports.html",
         reports=list_reports(),
         admin_key=request.args.get("key", ""),
         company_name=os.getenv("COMPANY_NAME", DEFAULT_COMPANY_NAME),
     )
+
 
 
 @app.route("/api/questions")
@@ -1107,6 +1176,7 @@ def api_questions():
 
 @app.route("/api/progress", methods=["POST"])
 def update_progress():
+    finalize_inactive_interviews()
     interview_id = session.get("interview_id")
     if not interview_id:
         return jsonify({"updated": False}), 400
@@ -1405,11 +1475,17 @@ def log_warning():
     }
     current = []
     with get_db() as conn:
-        ensure_column(conn, "interviews", "proctoring_violations", "JSONB DEFAULT '[]'::jsonb")
-        ensure_column(conn, "interviews", "warning_count", "INTEGER DEFAULT 0")
+        conn.execute(
+            "ALTER TABLE interviews ADD COLUMN IF NOT EXISTS "
+            "proctoring_violations JSONB DEFAULT '[]'::jsonb"
+        )
+        conn.execute(
+            "ALTER TABLE interviews ADD COLUMN IF NOT EXISTS "
+            "warning_count INTEGER DEFAULT 0"
+        )
         row = conn.execute("SELECT proctoring_violations, warning_count FROM interviews WHERE interview_id = %s", (str(interview_id),)).fetchone()
         if row:
-            current = row.get("proctoring_violations") or []
+            current = row.get("proctoring_violations") or [] # pyright: ignore[reportAttributeAccessIssue]
             if isinstance(current, str):
                 try:
                     current = json.loads(current)

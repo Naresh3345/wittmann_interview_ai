@@ -1694,17 +1694,8 @@ function startSectionTimer() {
     sectionRemaining[activeSection] -= 1;
     updateTimerDisplay();
 
-    if (activeSection === 'Aptitude' || activeSection === 'Programming') {
-      perQuestionTimeLeft -= 1;
-      if (perQuestionTimeLeft <= 0) {
-        perQuestionTimeLeft = (activeSection === 'Programming') ? 90 : 60;
-        showWarningPopup('Time ended for this question. Moving to next question.');
-        goToNextQuestion();
-        return;
-      }
-    }
-
     if (sectionRemaining[activeSection] <= 0) {
+
 
       if (activeSection === 'Aptitude') {
         aptitudeCompleted = true;
@@ -1894,3 +1885,38 @@ async function submitInterview(autoSubmitReason = '') {
 
 startCamera();
 updateAnsweredCount();
+
+function notifyCandidateLeave(status) {
+  if (submitted) return;
+  const payload = JSON.stringify({
+    status: status,
+    timestamp: new Date().toISOString()
+  });
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon('/api/candidate-leave', payload);
+  } else {
+    fetch('/api/candidate-leave', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true
+    }).catch(() => {});
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    notifyCandidateLeave('left');
+  } else {
+    notifyCandidateLeave('returned');
+  }
+});
+
+window.addEventListener('beforeunload', () => {
+  notifyCandidateLeave('left');
+});
+
+window.addEventListener('pagehide', () => {
+  notifyCandidateLeave('left');
+});
+

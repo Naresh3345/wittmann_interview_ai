@@ -276,7 +276,9 @@ def init_db():
         ensure_column(conn, "interviews", "interview_started_at", "TIMESTAMPTZ")
         ensure_column(conn, "interviews", "interview_completed_at", "TIMESTAMPTZ")
         ensure_column(conn, "interviews", "last_activity_at", "TIMESTAMPTZ")
+        ensure_column(conn, "interviews", "last_left_at", "TIMESTAMPTZ")
         ensure_column(conn, "interviews", "current_section", "TEXT")
+
         ensure_column(conn, "interviews", "current_question_number", "INTEGER")
         ensure_column(conn, "interviews", "current_question_text", "TEXT")
         ensure_column(conn, "interviews", "proctoring_violations", "JSONB DEFAULT '[]'::jsonb")
@@ -388,6 +390,9 @@ def get_proctoring_settings():
         "focus_warning_enabled": True,
         "camera_warning_enabled": True,
         "multiple_face_warning_enabled": True,
+        "aptitude_round_enabled": True,
+        "programming_round_enabled": True,
+        "ai_interview_round_enabled": True,
         "tab_switch_limit": 5,
         "warning_limit": 10,
     }
