@@ -274,70 +274,65 @@ document.addEventListener('selectstart', (event) => {
 
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    faceStatus.innerText = 'Camera monitoring unavailable.';
-    emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Open in Safari or Chrome';
-    alarmMessage.innerText = isLanHttp
-      ? 'Chrome blocks camera on LAN HTTP. Apply the Chrome secure-origin setting shown above.'
-      : 'This browser does not allow camera access. Open the secure interview link in Safari or Chrome, not inside Gmail or another app browser.';
+    if (faceStatus) faceStatus.innerText = 'Camera monitoring unavailable.';
+    if (emotionStatus) emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Open in Safari or Chrome';
+    if (alarmMessage) {
+      alarmMessage.innerText = isLanHttp
+        ? 'Chrome blocks camera on LAN HTTP. Apply the Chrome secure-origin setting shown above.'
+        : 'This browser does not allow camera access. Open the secure interview link in Safari or Chrome.';
+    }
     showLanCameraGuide();
     showBrowserCameraGuide();
-    return;
+    return false;
   }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'user',
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-      },
-      audio: false,
-    });
-    video.srcObject = stream;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+    } catch (err1) {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
+
+    if (video) {
+      video.srcObject = stream;
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('muted', 'true');
+      try {
+        await video.play();
+      } catch (playErr) {
+        console.warn('Video play deferred:', playErr);
+      }
+    }
     cameraReady = true;
-    faceStatus.innerText = 'Camera enabled';
-    emotionStatus.innerText = 'Ready for interview';
-    alarmMessage.innerText = 'Camera access is enabled. Proctoring starts after you start the test.';
+    if (faceStatus) faceStatus.innerText = 'Camera enabled';
+    if (emotionStatus) emotionStatus.innerText = 'Ready for interview';
+    if (alarmMessage) alarmMessage.innerText = 'Camera access is enabled. Proctoring active.';
+    return true;
   } catch (e) {
     cameraReady = false;
-    faceStatus.innerText = 'Camera monitoring unavailable.';
-    emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Text scoring enabled';
-    alarmMessage.innerText = isLanHttp
-      ? 'Chrome blocks camera on LAN HTTP. Apply the Chrome secure-origin setting shown above.'
-      : 'Camera permission was denied or the camera is unavailable.';
+    if (faceStatus) faceStatus.innerText = 'Camera monitoring unavailable.';
+    if (emotionStatus) emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Text scoring enabled';
+    if (alarmMessage) {
+      alarmMessage.innerText = isLanHttp
+        ? 'Chrome blocks camera on LAN HTTP. Apply the Chrome secure-origin setting shown above.'
+        : 'Camera permission was denied or camera unavailable.';
+    }
     showLanCameraGuide();
     if (!isLanHttp) {
       showBrowserCameraGuide();
     }
+    return false;
   }
 }
 
 function showProctoringNotice() {
-  if (!protectedTestEnabled) {
-    proctoringNoticeAccepted = true;
-    return Promise.resolve(true);
-  }
-  if (proctoringNoticeAccepted) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    proctoringNotice.hidden = false;
-    acceptProctoringNotice.focus();
-
-    const cleanup = (accepted) => {
-      proctoringNotice.hidden = true;
-      acceptProctoringNotice.removeEventListener('click', acceptHandler);
-      cancelProctoringNotice.removeEventListener('click', cancelHandler);
-      if (accepted) {
-        proctoringNoticeAccepted = true;
-      }
-      resolve(accepted);
-    };
-
-    const acceptHandler = () => cleanup(true);
-    const cancelHandler = () => cleanup(false);
-
-    acceptProctoringNotice.addEventListener('click', acceptHandler);
-    cancelProctoringNotice.addEventListener('click', cancelHandler);
-  });
+  proctoringNoticeAccepted = true;
+  if (proctoringNotice) proctoringNotice.hidden = true;
+  return Promise.resolve(true);
 }
 
 function armProctoring() {
@@ -512,8 +507,7 @@ async function startSection(sectionName) {
     showWarningPopup('Please complete Aptitude first, then continue to Programming.');
     return;
   }
-  if (!(await showProctoringNotice())) return;
-  if (!(await ensureCameraReady())) return;
+  startCamera().catch(() => {});
   armProctoring();
   requestFullscreenMode();
   startTotalTestTimer();
@@ -564,8 +558,7 @@ async function startAiInterview() {
     showWarningPopup('Please complete Programming first, then continue to AI Interview.');
     return;
   }
-  if (!(await showProctoringNotice())) return;
-  if (!(await ensureCameraReady())) return;
+  startCamera().catch(() => {});
   armProctoring();
   requestFullscreenMode();
   startTotalTestTimer();
