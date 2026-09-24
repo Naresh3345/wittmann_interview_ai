@@ -180,12 +180,7 @@ function showBrowserCameraGuide() {
 }
 
 document.querySelectorAll('[data-start-section]').forEach((button) => {
-  const handler = (e) => {
-    e.preventDefault();
-    startSection(button.dataset.startSection);
-  };
-  button.addEventListener('click', handler);
-  button.addEventListener('touchend', handler);
+  button.addEventListener('click', () => startSection(button.dataset.startSection));
 });
 
 nextSectionButton?.addEventListener('click', () => {
@@ -193,32 +188,9 @@ nextSectionButton?.addEventListener('click', () => {
   showProgrammingTransition();
 });
 
-startProgrammingButton?.addEventListener('click', (e) => {
-  e.preventDefault();
-  startSection('Programming');
-});
-startProgrammingButton?.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  startSection('Programming');
-});
-
-startAiInterviewLauncher?.addEventListener('click', (e) => {
-  e.preventDefault();
-  startAiInterview();
-});
-startAiInterviewLauncher?.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  startAiInterview();
-});
-
-startAiInterviewButton?.addEventListener('click', (e) => {
-  e.preventDefault();
-  startAiInterview();
-});
-startAiInterviewButton?.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  startAiInterview();
-});
+startProgrammingButton?.addEventListener('click', () => startSection('Programming'));
+startAiInterviewLauncher?.addEventListener('click', () => startAiInterview());
+startAiInterviewButton?.addEventListener('click', () => startAiInterview());
 
 submitInterviewButton?.addEventListener('click', () => showFinishNotice());
 
@@ -272,67 +244,144 @@ document.addEventListener('selectstart', (event) => {
   }
 });
 
-async function startCamera() {
+let cameraStartRetryTimer = null;
+
+async function startCamera(retryCount = 0) {
   if (!navigator.mediaDevices?.getUserMedia) {
     if (faceStatus) faceStatus.innerText = 'Camera monitoring unavailable.';
     if (emotionStatus) emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Open in Safari or Chrome';
     if (alarmMessage) {
       alarmMessage.innerText = isLanHttp
         ? 'Chrome blocks camera on LAN HTTP. Apply the Chrome secure-origin setting shown above.'
-        : 'This browser does not allow camera access. Open the secure interview link in Safari or Chrome.';
+        : 'This browser does not allow camera access. Open the secure interview link in Safari or Chrome, not inside Gmail or another app browser.';
     }
     showLanCameraGuide();
     showBrowserCameraGuide();
-    return false;
+    return;
   }
 
-  try {
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      });
-    } catch (err1) {
-      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-    }
-
-    if (video) {
-      video.srcObject = stream;
-      video.setAttribute('playsinline', 'true');
-      video.setAttribute('muted', 'true');
-      try {
-        await video.play();
-      } catch (playErr) {
-        console.warn('Video play deferred:', playErr);
-      }
-    }
+  if (video && video.srcObject && video.srcObject.active) {
     cameraReady = true;
     if (faceStatus) faceStatus.innerText = 'Camera enabled';
     if (emotionStatus) emotionStatus.innerText = 'Ready for interview';
-    if (alarmMessage) alarmMessage.innerText = 'Camera access is enabled. Proctoring active.';
-    return true;
-  } catch (e) {
-    cameraReady = false;
-    if (faceStatus) faceStatus.innerText = 'Camera monitoring unavailable.';
-    if (emotionStatus) emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Text scoring enabled';
-    if (alarmMessage) {
-      alarmMessage.innerText = isLanHttp
-        ? 'Chrome blocks camera on LAN HTTP. Apply the Chrome secure-origin setting shown above.'
-        : 'Camera permission was denied or camera unavailable.';
+    return;
+  }
+
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'user',
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+      },
+      audio: false,
+    });
+  } catch (err1) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+    } catch (err2) {
+      stream = null;
     }
-    showLanCameraGuide();
-    if (!isLanHttp) {
-      showBrowserCameraGuide();
-    }
-    return false;
+  }
+
+  if (stream) {
+    try {
+      if (video) {
+        video.srcObject = stream;
+        await video.play().catch(() => {});
+      }
+      cameraReady = true;
+      if (faceStatus) faceStatus.innerText = 'Camera enabled';
+      if (emotionStatus) emotionStatus.innerText = 'Ready for interview';
+      if (alarmMessage) alarmMessage.innerText = 'Camera access is enabled. Proctoring starts after you start the test.';
+      return;
+    } catch (e) {}
+  }
+
+  if (retryCount < 3) {
+    clearTimeout(cameraStartRetryTimer);
+    cameraStartRetryTimer = setTimeout(() => {
+      startCamera(retryCount + 1);
+    }, 800 * (retryCount + 1));
+    return;
+  }
+
+  cameraReady = false;
+  if (faceStatus) faceStatus.innerText = 'Camera monitoring unavailable.';
+  if (emotionStatus) emotionStatus.innerText = isLanHttp ? 'Chrome camera setting required' : 'Text scoring enabled';
+  if (alarmMessage) {
+    alarmMessage.innerText = isLanHttp
+      ? 'Chrome blocks camera on LAN HTTP. Apply the Chrome secure-origin setting shown above.'
+      : 'Camera permission was denied or the camera is unavailable. Tap here to retry camera access.';
+  }
+  showLanCameraGuide();
+  if (!isLanHttp) {
+    showBrowserCameraGuide();
   }
 }
 
+if (video) {
+  video.addEventListener('click', () => {
+    if (!cameraReady) {
+      if (faceStatus) faceStatus.innerText = 'Retrying camera...';
+      startCamera(0);
+    }
+  });
+}
+
+function setupVirtualKeyboardDismiss() {
+  const dismissKeyboard = () => {
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
+      activeEl.blur();
+    }
+  };
+
+  window.addEventListener('scroll', dismissKeyboard, { passive: true });
+  document.addEventListener('touchmove', dismissKeyboard, { passive: true });
+
+  document.addEventListener('touchstart', (e) => {
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
+      if (!activeEl.contains(e.target)) {
+        activeEl.blur();
+      }
+    }
+  }, { passive: true });
+}
+
+setupVirtualKeyboardDismiss();
+
 function showProctoringNotice() {
-  proctoringNoticeAccepted = true;
-  if (proctoringNotice) proctoringNotice.hidden = true;
-  return Promise.resolve(true);
+  if (!protectedTestEnabled) {
+    proctoringNoticeAccepted = true;
+    return Promise.resolve(true);
+  }
+  if (proctoringNoticeAccepted) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    proctoringNotice.hidden = false;
+    acceptProctoringNotice.focus();
+
+    const cleanup = (accepted) => {
+      proctoringNotice.hidden = true;
+      acceptProctoringNotice.removeEventListener('click', acceptHandler);
+      cancelProctoringNotice.removeEventListener('click', cancelHandler);
+      if (accepted) {
+        proctoringNoticeAccepted = true;
+      }
+      resolve(accepted);
+    };
+
+    const acceptHandler = () => cleanup(true);
+    const cancelHandler = () => cleanup(false);
+
+    acceptProctoringNotice.addEventListener('click', acceptHandler);
+    cancelProctoringNotice.addEventListener('click', cancelHandler);
+  });
 }
 
 function armProctoring() {
@@ -348,16 +397,14 @@ function armProctoring() {
 async function ensureCameraReady() {
   if (!protectedTestEnabled) return true;
   if (cameraReady) return true;
-  try {
-    await startCamera();
-  } catch (e) {}
-  if (!cameraReady) {
-    const message = isLanHttp
-      ? 'Chrome blocks camera on LAN HTTP link. Proctoring alerts will log camera status.'
-      : 'Camera permission is pending or unavailable. Continuing with interview scoring.';
-    if (alarmMessage) alarmMessage.innerText = message;
-  }
-  return true;
+  await startCamera();
+  if (cameraReady) return true;
+  const message = isLanHttp
+    ? 'Camera is blocked on this LAN HTTP link. Enable the Chrome secure-origin setting shown in the camera panel, then reload and allow camera access.'
+    : 'Camera access is required before starting the interview. Please allow camera permission and try again.';
+  alarmMessage.innerText = message;
+  showWarningPopup(message);
+  return false;
 }
 
 function playAlarmTone() {
@@ -507,7 +554,8 @@ async function startSection(sectionName) {
     showWarningPopup('Please complete Aptitude first, then continue to Programming.');
     return;
   }
-  startCamera().catch(() => {});
+  if (!(await showProctoringNotice())) return;
+  if (!(await ensureCameraReady())) return;
   armProctoring();
   requestFullscreenMode();
   startTotalTestTimer();
@@ -516,7 +564,7 @@ async function startSection(sectionName) {
   document.querySelectorAll('.test-section').forEach((item) => {
     item.hidden = true;
   });
-  if (sectionLauncher) sectionLauncher.hidden = true;
+  sectionLauncher.hidden = true;
   if (programmingTransition) {
     programmingTransition.hidden = true;
   }
@@ -526,14 +574,13 @@ async function startSection(sectionName) {
   if (aiInterviewPanel) {
     aiInterviewPanel.hidden = true;
   }
-  if (nextSectionButton) nextSectionButton.hidden = true;
-  if (submitInterviewButton) submitInterviewButton.hidden = !canSubmitFromWrittenSection(sectionName);
+  nextSectionButton.hidden = true;
+  submitInterviewButton.hidden = !canSubmitFromWrittenSection(sectionName);
   if (questionFloatNav) {
     questionFloatNav.hidden = false;
   }
   showCurrentQuestion();
   updateSectionActions();
-  updateAnsweredCount();
   timerSection.innerText = `${sectionName} Timer`;
   updateTimerDisplay();
   startSectionTimer();
@@ -542,68 +589,6 @@ async function startSection(sectionName) {
     firstInput.focus();
     activeAnswerId = firstInput.id || activeAnswerId;
   }
-}
-
-async function startAiInterview() {
-  if (submitted) return;
-  if (!enabledSections['AI Interview']) {
-    showWarningPopup('AI Interview is disabled for this role.');
-    return;
-  }
-  if (enabledSections.Aptitude && !aptitudeCompleted) {
-    showWarningPopup('Please complete Aptitude first, then continue to AI Interview.');
-    return;
-  }
-  if (enabledSections.Programming && !programmingCompleted) {
-    showWarningPopup('Please complete Programming first, then continue to AI Interview.');
-    return;
-  }
-  startCamera().catch(() => {});
-  armProctoring();
-  requestFullscreenMode();
-  startTotalTestTimer();
-  aiInterviewStarted = true;
-  aiInterviewStartedAt = new Date().toISOString();
-  activeSection = 'AI Interview';
-  aiCurrentIndex = 0;
-
-  document.querySelectorAll('.test-section').forEach((item) => {
-    item.hidden = true;
-  });
-  if (sectionLauncher) sectionLauncher.hidden = true;
-  if (programmingTransition) programmingTransition.hidden = true;
-  if (aiInterviewTransition) aiInterviewTransition.hidden = true;
-  if (aiInterviewPanel) aiInterviewPanel.hidden = false;
-  if (nextSectionButton) nextSectionButton.hidden = true;
-  if (submitInterviewButton) submitInterviewButton.hidden = true;
-  if (questionFloatNav) questionFloatNav.hidden = true;
-  if (questionMapPanel) questionMapPanel.hidden = true;
-
-  updateAnsweredCount();
-  timerSection.innerText = 'AI HR Interview Timer';
-  updateTimerDisplay('AI Interview');
-  startSectionTimer();
-  startAiAudioRecording();
-  playAiIntroSpeech();
-}
-
-function updateAnsweredCount() {
-  if (!answeredCountDisplay || !sectionQuestionCount) return;
-  const currentSection = activeSection || (enabledSections.Aptitude ? 'Aptitude' : (enabledSections.Programming ? 'Programming' : 'AI Interview'));
-  if (progressSection) {
-    progressSection.innerText = currentSection;
-  }
-  let total = 0;
-  let answered = 0;
-  if (currentSection === 'AI Interview') {
-    total = aiInterviewQuestions.length || 15;
-    answered = aiTranscript.length;
-  } else {
-    total = sectionQuestionTotal(currentSection);
-    answered = sectionAnsweredCount(currentSection);
-  }
-  answeredCountDisplay.innerText = String(answered);
-  sectionQuestionCount.innerText = String(total);
 }
 
 function isQuestionAnswered(question) {
@@ -1390,38 +1375,14 @@ function speakEncouragement() {
   });
 }
 
-let candidateAudioContext;
-let candidateGainNode;
-
-function initCandidateAudioVisualizer(stream) {
-  if (!stream) return;
-  try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!candidateAudioContext) {
-      candidateAudioContext = new AudioCtx();
-    }
-    if (candidateAudioContext.state === 'suspended') {
-      candidateAudioContext.resume();
-    }
-    const source = candidateAudioContext.createMediaStreamSource(stream);
-    candidateGainNode = candidateAudioContext.createGain();
-    candidateGainNode.gain.value = 3.0;
-    source.connect(candidateGainNode);
-  } catch (err) {
-    console.warn('Audio gain boost init error:', err);
-  }
-}
-
 async function startAiAudioRecording() {
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder || aiMediaRecorder) return;
   try {
     const audioConstraints = {
       audio: {
-        echoCancellation: { ideal: true },
-        noiseSuppression: { ideal: false },
-        autoGainControl: { ideal: true },
-        channelCount: 1,
-        sampleRate: 48000,
+        echoCancellation: true,
+        noiseSuppression: false,
+        autoGainControl: true,
       },
       video: false,
     };
@@ -1607,21 +1568,16 @@ function startCandidateListening() {
     }, 1800);
   };
 
-  aiRecognition.onerror = (event) => {
+  aiRecognition.onerror = () => {
     showEncouragingBanner(false);
     if (saveAiAnswerButton) saveAiAnswerButton.disabled = !(aiManualAnswer?.value || '').trim();
-    if (isListeningToCandidate && !aiInterviewCompleted) {
-      setTimeout(() => {
-        try { aiRecognition?.start?.(); } catch (e) {}
-      }, 300);
-    }
   };
 
   aiRecognition.onend = () => {
     if (isListeningToCandidate && !aiInterviewCompleted) {
-      setTimeout(() => {
-        try { aiRecognition?.start?.(); } catch (e) {}
-      }, 200);
+      try {
+        aiRecognition.start();
+      } catch (e) {}
     }
   };
 
@@ -2034,31 +1990,5 @@ window.addEventListener('beforeunload', () => {
 
 window.addEventListener('pagehide', () => {
   notifyCandidateLeave('left');
-});
-
-// Auto-close virtual keypad on scroll or touch drag outside, re-open on click/tap
-window.addEventListener('scroll', () => {
-  const activeEl = document.activeElement;
-  if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
-    activeEl.blur();
-  }
-}, { passive: true });
-
-document.addEventListener('touchmove', (event) => {
-  const activeEl = document.activeElement;
-  if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
-    if (!activeEl.contains(event.target)) {
-      activeEl.blur();
-    }
-  }
-}, { passive: true });
-
-document.addEventListener('click', (event) => {
-  const target = event.target;
-  if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
-    if (document.activeElement !== target) {
-      target.focus();
-    }
-  }
 });
 

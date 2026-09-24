@@ -1095,16 +1095,7 @@ def finalize_inactive_interviews():
                 iid = row[0]
                 reason = "Tab closed for over 1 minute. Interview auto completed."
                 try:
-                    conn.execute(
-                        """
-                        UPDATE interviews
-                        SET status = 'Auto Submitted',
-                            shortlist_reason = %s,
-                            interview_completed_at = %s
-                        WHERE interview_id = %s
-                        """,
-                        (reason, now, iid),
-                    )
+                    submit_interview_record(iid, auto_submit_reason=reason)
                 except Exception:
                     conn.execute(
                         "UPDATE interviews SET status = 'Completed', shortlist_reason = %s, interview_completed_at = %s WHERE interview_id = %s",
@@ -1250,25 +1241,28 @@ def transcribe_audio_bytes(audio_bytes: bytes) -> str:
         try:
             cmd = [
                 ffmpeg_exe, "-y", "-i", in_path,
-                "-af", "highpass=f=60,lowpass=f=3800,volume=2.5,dynaudnorm=f=150:g=15:m=100.0",
+                "-af", "dynaudnorm=f=150:g=15,volume=8.0,highpass=f=50",
                 "-ac", "1", "-ar", "16000", out_path
             ]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             r = sr.Recognizer()
-            r.energy_threshold = 150
-            r.dynamic_energy_threshold = False
-            r.pause_threshold = 0.5
-            r.phrase_threshold = 0.1
+            r.energy_threshold = 25
+            r.dynamic_energy_threshold = True
+            r.dynamic_energy_adjustment_damping = 0.15
+            r.dynamic_energy_ratio = 1.2
+            r.pause_threshold = 0.8
             with sr.AudioFile(out_path) as source:
                 audio_data = r.record(source)
+                text = ""
                 for lang in ["en-IN", "en-US", "en-GB"]:
                     try:
-                        text = r.recognize_google(audio_data, language=lang)
-                        if text and text.strip():
-                            return text.strip()
+                        res = r.recognize_google(audio_data, language=lang)
+                        if res and len(res.strip()) > 0:
+                            text = res.strip()
+                            break
                     except Exception:
                         continue
-                return ""
+                return text
         except Exception:
             return ""
         finally:
