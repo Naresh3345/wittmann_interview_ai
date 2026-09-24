@@ -1303,14 +1303,38 @@ function speakEncouragement() {
   });
 }
 
+let candidateAudioContext;
+let candidateGainNode;
+
+function initCandidateAudioVisualizer(stream) {
+  if (!stream) return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!candidateAudioContext) {
+      candidateAudioContext = new AudioCtx();
+    }
+    if (candidateAudioContext.state === 'suspended') {
+      candidateAudioContext.resume();
+    }
+    const source = candidateAudioContext.createMediaStreamSource(stream);
+    candidateGainNode = candidateAudioContext.createGain();
+    candidateGainNode.gain.value = 3.0;
+    source.connect(candidateGainNode);
+  } catch (err) {
+    console.warn('Audio gain boost init error:', err);
+  }
+}
+
 async function startAiAudioRecording() {
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder || aiMediaRecorder) return;
   try {
     const audioConstraints = {
       audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        echoCancellation: { ideal: true },
+        noiseSuppression: { ideal: false },
+        autoGainControl: { ideal: true },
+        channelCount: 1,
+        sampleRate: 48000,
       },
       video: false,
     };
@@ -1496,16 +1520,21 @@ function startCandidateListening() {
     }, 1800);
   };
 
-  aiRecognition.onerror = () => {
+  aiRecognition.onerror = (event) => {
     showEncouragingBanner(false);
     if (saveAiAnswerButton) saveAiAnswerButton.disabled = !(aiManualAnswer?.value || '').trim();
+    if (isListeningToCandidate && !aiInterviewCompleted) {
+      setTimeout(() => {
+        try { aiRecognition?.start?.(); } catch (e) {}
+      }, 300);
+    }
   };
 
   aiRecognition.onend = () => {
     if (isListeningToCandidate && !aiInterviewCompleted) {
-      try {
-        aiRecognition.start();
-      } catch (e) {}
+      setTimeout(() => {
+        try { aiRecognition?.start?.(); } catch (e) {}
+      }, 200);
     }
   };
 
@@ -1918,5 +1947,31 @@ window.addEventListener('beforeunload', () => {
 
 window.addEventListener('pagehide', () => {
   notifyCandidateLeave('left');
+});
+
+// Auto-close virtual keypad on scroll or touch drag outside, re-open on click/tap
+window.addEventListener('scroll', () => {
+  const activeEl = document.activeElement;
+  if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
+    activeEl.blur();
+  }
+}, { passive: true });
+
+document.addEventListener('touchmove', (event) => {
+  const activeEl = document.activeElement;
+  if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
+    if (!activeEl.contains(event.target)) {
+      activeEl.blur();
+    }
+  }
+}, { passive: true });
+
+document.addEventListener('click', (event) => {
+  const target = event.target;
+  if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
+    if (document.activeElement !== target) {
+      target.focus();
+    }
+  }
 });
 

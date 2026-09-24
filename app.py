@@ -1092,7 +1092,7 @@ def finalize_inactive_interviews():
                 (now,),
             ).fetchall()
             for row in rows:
-                iid = row["interview_id"]
+                iid = row[0]
                 reason = "Tab closed for over 1 minute. Interview auto completed."
                 try:
                     submit_interview_record(iid, auto_submit_reason=reason)
@@ -1239,21 +1239,27 @@ def transcribe_audio_bytes(audio_bytes: bytes) -> str:
             in_path = in_file.name
         out_path = in_path + ".wav"
         try:
-            cmd = [ffmpeg_exe, "-y", "-i", in_path, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,volume=4.0,highpass=f=80", "-ac", "1", "-ar", "16000", out_path]
+            cmd = [
+                ffmpeg_exe, "-y", "-i", in_path,
+                "-af", "highpass=f=60,lowpass=f=3800,volume=2.5,dynaudnorm=f=150:g=15:m=100.0",
+                "-ac", "1", "-ar", "16000", out_path
+            ]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             r = sr.Recognizer()
-            r.energy_threshold = 80
-            r.dynamic_energy_threshold = True
+            r.energy_threshold = 150
+            r.dynamic_energy_threshold = False
+            r.pause_threshold = 0.5
+            r.phrase_threshold = 0.1
             with sr.AudioFile(out_path) as source:
                 audio_data = r.record(source)
-                try:
-                    text = r.recognize_google(audio_data, language="en-IN")
-                except Exception:
+                for lang in ["en-IN", "en-US", "en-GB"]:
                     try:
-                        text = r.recognize_google(audio_data, language="en-US")
+                        text = r.recognize_google(audio_data, language=lang)
+                        if text and text.strip():
+                            return text.strip()
                     except Exception:
-                        text = ""
-                return text.strip()
+                        continue
+                return ""
         except Exception:
             return ""
         finally:
