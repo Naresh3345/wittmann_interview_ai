@@ -1095,7 +1095,16 @@ def finalize_inactive_interviews():
                 iid = row[0]
                 reason = "Tab closed for over 1 minute. Interview auto completed."
                 try:
-                    submit_interview_record(iid, auto_submit_reason=reason)
+                    conn.execute(
+                        """
+                        UPDATE interviews
+                        SET status = 'Auto Submitted',
+                            shortlist_reason = %s,
+                            interview_completed_at = %s
+                        WHERE interview_id = %s
+                        """,
+                        (reason, now, iid),
+                    )
                 except Exception:
                     conn.execute(
                         "UPDATE interviews SET status = 'Completed', shortlist_reason = %s, interview_completed_at = %s WHERE interview_id = %s",

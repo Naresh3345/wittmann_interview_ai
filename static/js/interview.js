@@ -180,7 +180,12 @@ function showBrowserCameraGuide() {
 }
 
 document.querySelectorAll('[data-start-section]').forEach((button) => {
-  button.addEventListener('click', () => startSection(button.dataset.startSection));
+  const handler = (e) => {
+    e.preventDefault();
+    startSection(button.dataset.startSection);
+  };
+  button.addEventListener('click', handler);
+  button.addEventListener('touchend', handler);
 });
 
 nextSectionButton?.addEventListener('click', () => {
@@ -188,9 +193,32 @@ nextSectionButton?.addEventListener('click', () => {
   showProgrammingTransition();
 });
 
-startProgrammingButton?.addEventListener('click', () => startSection('Programming'));
-startAiInterviewLauncher?.addEventListener('click', () => startAiInterview());
-startAiInterviewButton?.addEventListener('click', () => startAiInterview());
+startProgrammingButton?.addEventListener('click', (e) => {
+  e.preventDefault();
+  startSection('Programming');
+});
+startProgrammingButton?.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  startSection('Programming');
+});
+
+startAiInterviewLauncher?.addEventListener('click', (e) => {
+  e.preventDefault();
+  startAiInterview();
+});
+startAiInterviewLauncher?.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  startAiInterview();
+});
+
+startAiInterviewButton?.addEventListener('click', (e) => {
+  e.preventDefault();
+  startAiInterview();
+});
+startAiInterviewButton?.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  startAiInterview();
+});
 
 submitInterviewButton?.addEventListener('click', () => showFinishNotice());
 
@@ -325,14 +353,16 @@ function armProctoring() {
 async function ensureCameraReady() {
   if (!protectedTestEnabled) return true;
   if (cameraReady) return true;
-  await startCamera();
-  if (cameraReady) return true;
-  const message = isLanHttp
-    ? 'Camera is blocked on this LAN HTTP link. Enable the Chrome secure-origin setting shown in the camera panel, then reload and allow camera access.'
-    : 'Camera access is required before starting the interview. Please allow camera permission and try again.';
-  alarmMessage.innerText = message;
-  showWarningPopup(message);
-  return false;
+  try {
+    await startCamera();
+  } catch (e) {}
+  if (!cameraReady) {
+    const message = isLanHttp
+      ? 'Chrome blocks camera on LAN HTTP link. Proctoring alerts will log camera status.'
+      : 'Camera permission is pending or unavailable. Continuing with interview scoring.';
+    if (alarmMessage) alarmMessage.innerText = message;
+  }
+  return true;
 }
 
 function playAlarmTone() {
@@ -492,7 +522,7 @@ async function startSection(sectionName) {
   document.querySelectorAll('.test-section').forEach((item) => {
     item.hidden = true;
   });
-  sectionLauncher.hidden = true;
+  if (sectionLauncher) sectionLauncher.hidden = true;
   if (programmingTransition) {
     programmingTransition.hidden = true;
   }
@@ -502,13 +532,14 @@ async function startSection(sectionName) {
   if (aiInterviewPanel) {
     aiInterviewPanel.hidden = true;
   }
-  nextSectionButton.hidden = true;
-  submitInterviewButton.hidden = !canSubmitFromWrittenSection(sectionName);
+  if (nextSectionButton) nextSectionButton.hidden = true;
+  if (submitInterviewButton) submitInterviewButton.hidden = !canSubmitFromWrittenSection(sectionName);
   if (questionFloatNav) {
     questionFloatNav.hidden = false;
   }
   showCurrentQuestion();
   updateSectionActions();
+  updateAnsweredCount();
   timerSection.innerText = `${sectionName} Timer`;
   updateTimerDisplay();
   startSectionTimer();
@@ -517,6 +548,69 @@ async function startSection(sectionName) {
     firstInput.focus();
     activeAnswerId = firstInput.id || activeAnswerId;
   }
+}
+
+async function startAiInterview() {
+  if (submitted) return;
+  if (!enabledSections['AI Interview']) {
+    showWarningPopup('AI Interview is disabled for this role.');
+    return;
+  }
+  if (enabledSections.Aptitude && !aptitudeCompleted) {
+    showWarningPopup('Please complete Aptitude first, then continue to AI Interview.');
+    return;
+  }
+  if (enabledSections.Programming && !programmingCompleted) {
+    showWarningPopup('Please complete Programming first, then continue to AI Interview.');
+    return;
+  }
+  if (!(await showProctoringNotice())) return;
+  if (!(await ensureCameraReady())) return;
+  armProctoring();
+  requestFullscreenMode();
+  startTotalTestTimer();
+  aiInterviewStarted = true;
+  aiInterviewStartedAt = new Date().toISOString();
+  activeSection = 'AI Interview';
+  aiCurrentIndex = 0;
+
+  document.querySelectorAll('.test-section').forEach((item) => {
+    item.hidden = true;
+  });
+  if (sectionLauncher) sectionLauncher.hidden = true;
+  if (programmingTransition) programmingTransition.hidden = true;
+  if (aiInterviewTransition) aiInterviewTransition.hidden = true;
+  if (aiInterviewPanel) aiInterviewPanel.hidden = false;
+  if (nextSectionButton) nextSectionButton.hidden = true;
+  if (submitInterviewButton) submitInterviewButton.hidden = true;
+  if (questionFloatNav) questionFloatNav.hidden = true;
+  if (questionMapPanel) questionMapPanel.hidden = true;
+
+  updateAnsweredCount();
+  timerSection.innerText = 'AI HR Interview Timer';
+  updateTimerDisplay('AI Interview');
+  startSectionTimer();
+  startAiAudioRecording();
+  playAiIntroSpeech();
+}
+
+function updateAnsweredCount() {
+  if (!answeredCountDisplay || !sectionQuestionCount) return;
+  const currentSection = activeSection || (enabledSections.Aptitude ? 'Aptitude' : (enabledSections.Programming ? 'Programming' : 'AI Interview'));
+  if (progressSection) {
+    progressSection.innerText = currentSection;
+  }
+  let total = 0;
+  let answered = 0;
+  if (currentSection === 'AI Interview') {
+    total = aiInterviewQuestions.length || 15;
+    answered = aiTranscript.length;
+  } else {
+    total = sectionQuestionTotal(currentSection);
+    answered = sectionAnsweredCount(currentSection);
+  }
+  answeredCountDisplay.innerText = String(answered);
+  sectionQuestionCount.innerText = String(total);
 }
 
 function isQuestionAnswered(question) {
