@@ -9,6 +9,9 @@ const tabSwitchCount = document.getElementById('tabSwitchCount');
 const warningCount = document.getElementById('warningCount');
 const timerSection = document.getElementById('timerSection');
 const timerDisplay = document.getElementById('timerDisplay');
+const floatingTimerCard = document.getElementById('floatingTimerCard');
+const floatingTimerRound = document.getElementById('floatingTimerRound');
+const floatingTimerTime = document.getElementById('floatingTimerTime');
 const warningPopup = document.getElementById('warningPopup');
 const warningPopupMessage = document.getElementById('warningPopupMessage');
 const proctoringNotice = document.getElementById('proctoringNotice');
@@ -334,20 +337,10 @@ if (video) {
 }
 
 function setupVirtualKeyboardDismiss() {
-  const dismissKeyboard = () => {
-    const activeEl = document.activeElement;
-    if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
-      activeEl.blur();
-    }
-  };
-
-  window.addEventListener('scroll', dismissKeyboard, { passive: true });
-  document.addEventListener('touchmove', dismissKeyboard, { passive: true });
-
   document.addEventListener('touchstart', (e) => {
     const activeEl = document.activeElement;
     if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
-      if (!activeEl.contains(e.target)) {
+      if (!e.target.closest('input, textarea, select, button, label')) {
         activeEl.blur();
       }
     }
@@ -489,6 +482,20 @@ function triggerAlarm(reason, kind = 'warning') {
   playAlarmTone();
   showWarningPopup(reason);
   setTimeout(() => alarmBox.classList.remove('active'), 3500);
+
+  // Send warning live to server for real-time HR portal tracking
+  fetch('/api/log-warning', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: kind,
+      detail: reason,
+      timestamp: event.time,
+      question_id: event.question_id,
+      question_category: event.question_category,
+    }),
+  }).catch((err) => console.error('Error logging warning live:', err));
+
   if (tabSwitchTotal >= tabSwitchLimit) {
     submitInterview('Auto submitted because tab switching reached the limit.');
   } else if (warningTotal >= warningLimit) {
@@ -662,8 +669,32 @@ function clearSkippedIfAnswered(question) {
   }
 }
 
+let draftSyncTimer = null;
+function syncDraftAnswers() {
+  if (submitted) return;
+  clearTimeout(draftSyncTimer);
+  draftSyncTimer = setTimeout(() => {
+    const draft = {};
+    if (window.QUESTIONS) {
+      window.QUESTIONS.forEach((q) => {
+        const selectedOption = document.querySelector(`input[name="answer-${q.id}"]:checked`);
+        const answerBox = document.getElementById(`answer-${q.id}`);
+        const tableAnswer = collectTableAnswer(q.id);
+        const typedAnswer = answerBox ? answerBox.value.trim() : '';
+        draft[q.id] = selectedOption ? selectedOption.value : (tableAnswer || typedAnswer);
+      });
+    }
+    fetch('/api/save-draft-answers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers: draft }),
+    }).catch(() => {});
+  }, 300);
+}
+
 function reportProgress() {
   if (!activeSection || submitted) return;
+  syncDraftAnswers();
   const question = getCurrentQuestion();
   if (!question) return;
   clearTimeout(progressTimer);
@@ -1821,7 +1852,25 @@ function updateTimerDisplay(sectionName = activeSection) {
   const remaining = Math.max(sectionRemaining[displaySection] ?? DEFAULT_SECTION_SECONDS, 0);
   const minutes = String(Math.floor(remaining / 60)).padStart(2, '0');
   const seconds = String(remaining % 60).padStart(2, '0');
-  timerDisplay.innerText = `${minutes}:${seconds}`;
+  const formattedTime = `${minutes}:${seconds}`;
+  timerDisplay.innerText = formattedTime;
+
+  if (floatingTimerCard) {
+    if (testStarted || aiInterviewStarted || activeSection) {
+      floatingTimerCard.hidden = false;
+      let roundLabel = `Round 1: ${displaySection}`;
+      if (displaySection === 'Programming') roundLabel = `Round 2: ${displaySection}`;
+      if (displaySection === 'AI Interview') roundLabel = `Round 3: ${displaySection}`;
+      if (floatingTimerRound) {
+        floatingTimerRound.innerText = roundLabel;
+      }
+      if (floatingTimerTime) {
+        floatingTimerTime.innerText = formattedTime;
+      }
+    } else {
+      floatingTimerCard.hidden = true;
+    }
+  }
 }
 
 function updateAnsweredCount() {
@@ -1958,8 +2007,20 @@ async function submitInterview(autoSubmitReason = '') {
 startCamera();
 updateAnsweredCount();
 
+function uploadCurrentAudioChunk() {
+  if (aiMediaRecorder && aiMediaRecorder.state === 'recording') {
+    try {
+      aiMediaRecorder.requestData();
+    } catch (e) {}
+  }
+}
+
 function notifyCandidateLeave(status) {
   if (submitted) return;
+  try { syncDraftAnswers(); } catch (e) {}
+  if (status === 'left') {
+    uploadCurrentAudioChunk();
+  }
   const payload = JSON.stringify({
     status: status,
     timestamp: new Date().toISOString()

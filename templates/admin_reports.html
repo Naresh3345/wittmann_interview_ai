@@ -80,7 +80,13 @@
               <a class="table-link" href="/download-report?key={{ admin_key }}&path={{ report.ai_interview_report_path | urlencode }}">Transcript PDF</a>
               {% endif %}
               {% if report.ai_interview_audio_path %}
-              <br><a class="table-link" href="/download-report?key={{ admin_key }}&path={{ report.ai_interview_audio_path | urlencode }}">Audio</a>
+              <div style="margin-top:4px;">
+                <a class="table-link" href="/download-report?key={{ admin_key }}&path={{ report.ai_interview_audio_path | urlencode }}" target="_blank">🔊 Download Audio</a>
+                <br>
+                <audio controls preload="none" style="height:28px; width:140px; margin-top:3px;">
+                  <source src="/download-report?key={{ admin_key }}&path={{ report.ai_interview_audio_path | urlencode }}">
+                </audio>
+              </div>
               {% endif %}
               {% if not report.ai_interview_report_path and not report.ai_interview_audio_path %}
               -

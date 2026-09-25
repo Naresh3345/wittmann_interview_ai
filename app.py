@@ -58,6 +58,8 @@ from utils.database import (
     load_database_snapshot,
     mark_test_link_used,
     save_candidate_answers,
+    save_draft_answers,
+    get_draft_answers,
     save_ai_interview_audio,
     save_ai_interview_report,
     save_interview_questions,
@@ -1076,33 +1078,144 @@ def interview():
     )
 
 
+import threading
+import time
+
+
 def finalize_inactive_interviews():
     now = datetime.now()
     try:
         with get_db() as conn:
+            ensure_column(conn, "interviews", "draft_answers", "JSONB DEFAULT '{}'::jsonb")
+            ensure_column(conn, "interviews", "last_left_at", "TIMESTAMPTZ")
+            ensure_column(conn, "interviews", "ai_interview_audio_path", "TEXT")
+            ensure_column(conn, "interviews", "ai_interview_report_path", "TEXT")
+
             rows = conn.execute(
                 """
-                SELECT i.interview_id, i.user_id, u.name, i.status
+                SELECT i.interview_id, i.user_id, u.name, u.email, u.phone, u.resume_path,
+                       r.role_name, r.shortlist_min_marks, i.last_left_at, i.draft_answers,
+                       i.proctoring_violations, i.ai_interview_audio_path
                 FROM interviews i
                 JOIN users u ON i.user_id = u.user_id
+                JOIN roles r ON i.role_id = r.role_id
                 WHERE i.last_left_at IS NOT NULL
                   AND i.last_left_at <= %s - INTERVAL '60 seconds'
                   AND i.status NOT IN ('Completed', 'Auto Submitted')
                 """,
                 (now,),
             ).fetchall()
+
             for row in rows:
-                iid = row[0]
-                reason = "Tab closed for over 1 minute. Interview auto completed."
+                iid = row["interview_id"]
+                candidate_name = row["name"] or "Candidate"
+                reason = "Tab closed for over 1 minute. Test auto-submitted with partial answers."
+
                 try:
-                    submit_interview_record(iid, auto_submit_reason=reason)
+                    questions = load_interview_questions(iid)
+                    if not questions:
+                        questions = load_questions()
+
+                    draft_answers = row["draft_answers"] or {}
+                    if isinstance(draft_answers, str):
+                        try:
+                            draft_answers = json.loads(draft_answers)
+                        except Exception:
+                            draft_answers = {}
+
+                    results = []
+                    for question in questions:
+                        ans = draft_answers.get(str(question["id"]), "")
+                        evaluation = ai_wrapper.evaluate_answer(ans, question)
+                        results.append({
+                            "question": question,
+                            "answer": ans,
+                            "score": evaluation["score"],
+                            "feedback": evaluation["feedback"],
+                        })
+
+                    overall_percent, earned_marks, total_marks = calculate_weighted_score(results)
+                    save_candidate_answers(iid, results)
+
+                    violations = row["proctoring_violations"] or []
+                    if isinstance(violations, str):
+                        try:
+                            violations = json.loads(violations)
+                        except Exception:
+                            violations = []
+
+                    shortlist_min_marks = float(row["shortlist_min_marks"] or 0)
+                    shortlist_status, shortlist_reason = shortlist_candidate(earned_marks, violations, shortlist_min_marks)
+
+                    face_summary = {
+                        "candidate_email": row["email"] or "",
+                        "candidate_phone": row["phone"] or "",
+                        "resume_path": row["resume_path"] or "",
+                        "confidence_index": 0.0,
+                        "detected_frames": 0,
+                        "total_frames": 1,
+                        "proctoring_violations": violations,
+                        "auto_submit_reason": reason,
+                        "earned_marks": earned_marks,
+                        "total_marks": total_marks,
+                        "overall_score": overall_percent,
+                        "shortlist_status": shortlist_status,
+                        "shortlist_reason": shortlist_reason,
+                    }
+
+                    ai_turns = get_ai_interview_turns(iid)
+                    report_path = generate_pdf_report(candidate_name, results, face_summary, str(REPORT_DIR), ai_turns=ai_turns)
+
+                    complete_interview(
+                        iid,
+                        earned_marks,
+                        report_path,
+                        shortlist_status,
+                        reason,
+                        proctoring_violations=violations,
+                    )
+                    conn.execute(
+                        "UPDATE interviews SET status = 'Completed', last_left_at = NULL WHERE interview_id = %s",
+                        (iid,),
+                    )
                 except Exception:
                     conn.execute(
-                        "UPDATE interviews SET status = 'Completed', shortlist_reason = %s, interview_completed_at = %s WHERE interview_id = %s",
+                        "UPDATE interviews SET status = 'Completed', shortlist_reason = %s, interview_completed_at = %s, last_left_at = NULL WHERE interview_id = %s",
                         (reason, now, iid),
                     )
     except Exception:
         pass
+
+
+def start_inactive_finalizer_thread():
+    def loop():
+        while True:
+            time.sleep(15)
+            try:
+                finalize_inactive_interviews()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=loop, daemon=True)
+    t.start()
+
+
+try:
+    start_inactive_finalizer_thread()
+except Exception:
+    pass
+
+
+@app.route("/api/save-draft-answers", methods=["POST"])
+def save_draft_answers_endpoint():
+    payload = request.get_json(silent=True) or {}
+    interview_id = session.get("interview_id") or payload.get("interview_id")
+    if not interview_id:
+        return jsonify({"status": "ignored"}), 200
+    answers = payload.get("answers", {})
+    if isinstance(answers, dict):
+        save_draft_answers(interview_id, answers)
+    return jsonify({"status": "ok"}), 200
 
 
 @app.route("/api/candidate-leave", methods=["POST"])

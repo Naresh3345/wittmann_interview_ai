@@ -282,6 +282,7 @@ def init_db():
         ensure_column(conn, "interviews", "current_question_number", "INTEGER")
         ensure_column(conn, "interviews", "current_question_text", "TEXT")
         ensure_column(conn, "interviews", "proctoring_violations", "JSONB DEFAULT '[]'::jsonb")
+        ensure_column(conn, "interviews", "draft_answers", "JSONB DEFAULT '{}'::jsonb")
         ensure_column(conn, "interviews", "warning_count", "INTEGER DEFAULT 0")
         ensure_proctoring_settings_table(conn)
         conn.execute(
@@ -705,6 +706,37 @@ def save_ai_interview_audio(interview_id, audio_path):
             "UPDATE interviews SET ai_interview_audio_path = %s WHERE interview_id = %s",
             (audio_path, interview_id),
         )
+
+
+def save_draft_answers(interview_id, answers_dict):
+    if not interview_id or not isinstance(answers_dict, dict):
+        return
+    with get_db() as conn:
+        ensure_column(conn, "interviews", "draft_answers", "JSONB DEFAULT '{}'::jsonb")
+        conn.execute(
+            "UPDATE interviews SET draft_answers = %s, last_activity_at = now() WHERE interview_id = %s",
+            (Jsonb(answers_dict), str(interview_id)),
+        )
+
+
+def get_draft_answers(interview_id):
+    if not interview_id:
+        return {}
+    with get_db() as conn:
+        ensure_column(conn, "interviews", "draft_answers", "JSONB DEFAULT '{}'::jsonb")
+        row = conn.execute(
+            "SELECT draft_answers FROM interviews WHERE interview_id = %s",
+            (str(interview_id),),
+        ).fetchone()
+        if not row:
+            return {}
+        drafts = row.get("draft_answers") or {}
+        if isinstance(drafts, str):
+            try:
+                drafts = json.loads(drafts)
+            except Exception:
+                drafts = {}
+        return drafts if isinstance(drafts, dict) else {}
 
 
 def save_candidate_answers(interview_id, results):
