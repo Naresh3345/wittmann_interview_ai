@@ -95,6 +95,9 @@ let totalTestRemaining = Number(window.TOTAL_TEST_SECONDS) || Object.entries(sec
 }, 0);
 let aiRecognition;
 let isListeningToCandidate = false;
+let aiQuestionFinalTranscript = '';
+let aiQuestionInterimTranscript = '';
+let lastNativeSpeechTimestamp = 0;
 let aiCurrentIndex = 0;
 let aiCurrentTurn = null;
 let aiTranscript = [];
@@ -962,7 +965,9 @@ function showEncouragingBanner(show) {
 aiManualAnswer?.addEventListener('input', () => {
   showEncouragingBanner(false);
   setAiEmotion('listening', 'Listening Attentively...');
-  const val = (aiManualAnswer.value || '').trim();
+  aiQuestionFinalTranscript = (aiManualAnswer.value || '').trim();
+  aiQuestionInterimTranscript = '';
+  const val = aiQuestionFinalTranscript;
   if (candidateSubtitle) candidateSubtitle.innerText = val || 'Listening for your answer...';
   if (saveAiAnswerButton) saveAiAnswerButton.disabled = !val;
 });
@@ -1120,18 +1125,82 @@ function speakVolumePrompt() {
   });
 }
 
+const TECHNICAL_TERMS_MAP = {
+  'sql': 'SQL', 'nosql': 'NoSQL', 'mysql': 'MySQL', 'postgresql': 'PostgreSQL', 'sqlite': 'SQLite',
+  'mongodb': 'MongoDB', 'api': 'API', 'apis': 'APIs', 'rest': 'REST', 'restful': 'RESTful',
+  'json': 'JSON', 'xml': 'XML', 'html': 'HTML', 'html5': 'HTML5', 'css': 'CSS', 'css3': 'CSS3',
+  'js': 'JS', 'javascript': 'JavaScript', 'typescript': 'TypeScript', 'python': 'Python',
+  'java': 'Java', 'c++': 'C++', 'c#': 'C#', 'php': 'PHP', 'react': 'React', 'angular': 'Angular',
+  'vue': 'Vue', 'nodejs': 'Node.js', 'django': 'Django', 'flask': 'Flask', 'git': 'Git',
+  'github': 'GitHub', 'gitlab': 'GitLab', 'jira': 'Jira', 'bugzilla': 'Bugzilla',
+  'postman': 'Postman', 'swagger': 'Swagger', 'selenium': 'Selenium', 'testng': 'TestNG',
+  'junit': 'JUnit', 'jenkins': 'Jenkins', 'docker': 'Docker', 'kubernetes': 'Kubernetes',
+  'aws': 'AWS', 'azure': 'Azure', 'gcp': 'GCP', 'linux': 'Linux', 'windows': 'Windows',
+  'agile': 'Agile', 'scrum': 'Scrum', 'qa': 'QA', 'qc': 'QC', 'sdlc': 'SDLC', 'stlc': 'STLC',
+  'uat': 'UAT', 'ci/cd': 'CI/CD', 'oop': 'OOP', 'oops': 'OOP', 'dbms': 'DBMS', 'rdbms': 'RDBMS',
+  'http': 'HTTP', 'https': 'HTTPS', 'ui': 'UI', 'ux': 'UX', 'ai': 'AI', 'ml': 'ML',
+  'wittmann': 'WITTMANN', 'battenfeld': 'BATTENFELD', 'btech': 'B.Tech', 'mtech': 'M.Tech',
+  'b.tech': 'B.Tech', 'm.tech': 'M.Tech', 'bca': 'BCA', 'mca': 'MCA', 'it': 'IT'
+};
+
+const CONTRACTIONS_MAP = {
+  'im': "I'm", "i'm": "I'm", 'ive': "I've", "i've": "I've", 'ill': "I'll", "i'll": "I'll",
+  'id': "I'd", "i'd": "I'd", 'dont': "don't", 'cant': "can't", 'wont': "won't",
+  'didnt': "didn't", 'isnt': "isn't", 'arent': "aren't"
+};
+
+function formatRecognizedText(text, isFinal = false) {
+  if (!text) return '';
+  let s = String(text).trim();
+  s = s.replace(/\s+/g, ' ');
+  s = s.replace(/\s+([,.:;?!])/g, '$1');
+  s = s.replace(/([,.:;?!])([a-zA-Z0-9])/g, '$1 $2');
+  s = s.replace(/\b([a-zA-Z]{1,})\s+\1\b/gi, '$1');
+
+  const words = s.split(' ');
+  const formattedWords = words.map((w) => {
+    const match = w.match(/^([^\w]*)(.*?)([^\w]*)$/);
+    if (!match) return w;
+    const prefix = match[1] || '';
+    const core = match[2] || '';
+    const suffix = match[3] || '';
+    const lowCore = core.toLowerCase();
+
+    let replacement = core;
+    if (lowCore === 'i') {
+      replacement = 'I';
+    } else if (CONTRACTIONS_MAP[lowCore]) {
+      replacement = CONTRACTIONS_MAP[lowCore];
+    } else if (TECHNICAL_TERMS_MAP[lowCore]) {
+      replacement = TECHNICAL_TERMS_MAP[lowCore];
+    }
+    return prefix + replacement + suffix;
+  });
+
+  s = formattedWords.join(' ');
+  s = s.replace(/(?:^|[.!?]\s+)([a-z])/g, (m) => m.toUpperCase());
+
+  if (isFinal && s && /[a-zA-Z0-9]$/.test(s)) {
+    s += '.';
+  }
+  return s;
+}
+
 function evaluateVoiceCommands(rawText) {
   const lower = (rawText || '').toLowerCase().trim();
   if (!lower || !isListeningToCandidate || aiInterviewCompleted) return false;
 
+  const words = lower.split(/\s+/);
+  if (words.length > 5) return false;
+
   // Voice Command 1: Next Question
-  if (/\b(next question|move next|save and next|go to next|next)\b/i.test(lower)) {
+  if (/^(?:please\s+)?(?:go\s+to\s+next\s+question|next\s+question|move\s+to\s+next\s+question|save\s+and\s+next)$/i.test(lower)) {
     saveCurrentAiAnswer();
     return true;
   }
 
   // Voice Command 2: Repeat Question
-  if (/\b(repeat question|repeat the question|say again|pardon|repeat)\b/i.test(lower)) {
+  if (/^(?:please\s+)?(?:repeat\s+the\s+question|repeat\s+question|can\s+you\s+repeat(?:\s+the\s+question)?|pardon(?:\s+me)?)$/i.test(lower)) {
     const question = aiInterviewQuestions[aiCurrentIndex];
     if (!question) return true;
     isListeningToCandidate = false;
@@ -1149,9 +1218,15 @@ function evaluateVoiceCommands(rawText) {
 }
 
 let aiSTTLoopTimer = null;
+let aiSTTInFlight = false;
 
 function sendAudioChunkForSTT() {
-  if (!isListeningToCandidate || aiInterviewCompleted || !aiAudioStream) return;
+  if (!isListeningToCandidate || aiInterviewCompleted || !aiAudioStream || aiSTTInFlight) return;
+
+  const nativeActive = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+  if (nativeActive && lastNativeSpeechTimestamp > 0 && (Date.now() - lastNativeSpeechTimestamp < 6000)) {
+    return;
+  }
 
   let recorder;
   try {
@@ -1170,9 +1245,10 @@ function sendAudioChunkForSTT() {
   };
 
   recorder.onstop = async () => {
+    aiSTTInFlight = false;
     if (chunks.length === 0 || !isListeningToCandidate || aiInterviewCompleted) return;
     const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-    if (blob.size < 300) return;
+    if (blob.size < 500) return;
 
     const formData = new FormData();
     formData.append('audio', blob, 'chunk.webm');
@@ -1189,34 +1265,39 @@ function sendAudioChunkForSTT() {
 
         if (evaluateVoiceCommands(newText)) return;
 
-        let currentVal = (aiManualAnswer?.value || '').trim();
-        const words = newText.split(/\s+/);
-        const missingWords = words.filter((w) => w.length > 1 && !currentVal.toLowerCase().includes(w.toLowerCase()));
-        if (missingWords.length > 0) {
-          const appendText = missingWords.join(' ');
-          currentVal = currentVal ? `${currentVal} ${appendText}` : newText;
-          if (aiManualAnswer) {
-            aiManualAnswer.value = currentVal;
-            aiManualAnswer.scrollTop = aiManualAnswer.scrollHeight;
+        const formatted = formatRecognizedText(newText, true);
+        if (aiQuestionFinalTranscript) {
+          const stripped = aiQuestionFinalTranscript.replace(/\.+$/, '');
+          if (!stripped.toLowerCase().includes(formatted.toLowerCase().replace(/\.+$/, ''))) {
+            aiQuestionFinalTranscript = `${stripped}. ${formatted}`;
           }
-          if (candidateSubtitle) {
-            candidateSubtitle.innerText = currentVal;
-          }
-          if (saveAiAnswerButton) {
-            saveAiAnswerButton.disabled = false;
-          }
-          checkAndAnswerCandidateQuestion(currentVal);
+        } else {
+          aiQuestionFinalTranscript = formatted;
+        }
+
+        if (aiManualAnswer) {
+          aiManualAnswer.value = aiQuestionFinalTranscript;
+          aiManualAnswer.scrollTop = aiManualAnswer.scrollHeight;
+        }
+        if (candidateSubtitle) {
+          candidateSubtitle.innerText = aiQuestionFinalTranscript;
+        }
+        if (saveAiAnswerButton) {
+          saveAiAnswerButton.disabled = false;
         }
       }
     } catch (err) {}
   };
 
+  aiSTTInFlight = true;
   recorder.start();
   setTimeout(() => {
     if (recorder.state === 'recording') {
-      try { recorder.stop(); } catch (e) {}
+      try { recorder.stop(); } catch (e) { aiSTTInFlight = false; }
+    } else {
+      aiSTTInFlight = false;
     }
-  }, 2200);
+  }, 4000);
 }
 
 function startContinuousAudioTranscribe() {
@@ -1225,7 +1306,7 @@ function startContinuousAudioTranscribe() {
     if (isListeningToCandidate && !aiInterviewCompleted) {
       sendAudioChunkForSTT();
     }
-  }, 2500);
+  }, 3500);
 }
 
 function stopContinuousAudioTranscribe() {
@@ -1354,13 +1435,19 @@ function playAiIntroSpeech() {
 
 function checkAndAnswerCandidateQuestion(transcriptText) {
   const clean = (transcriptText || '').trim();
-  if (!clean || clean === lastProcessedQuestionText || clean.length < 3) return;
+  if (!clean || clean === lastProcessedQuestionText || clean.length < 5 || clean.length > 55) return;
+  const words = clean.split(/\s+/);
+  if (words.length > 8) return;
 
   if (evaluateVoiceCommands(clean)) return;
 
   const lower = clean.toLowerCase();
-  const questionTriggers = ['repeat', 'say again', 'pardon', 'didn\'t hear', 'what do you mean', 'explain', 'clarify', 'what is', 'can you', 'could you', 'how do'];
-  const isQuestion = lower.endsWith('?') || questionTriggers.some((w) => lower.includes(w));
+  const directQuestionTriggers = [
+    'repeat question', 'repeat the question', 'say again', 'can you repeat',
+    'could you repeat', 'what did you say', 'pardon me', 'please repeat',
+    'what do you mean', 'explain the question', 'could you explain'
+  ];
+  const isQuestion = directQuestionTriggers.some((w) => lower.includes(w));
 
   if (!isQuestion) return;
   lastProcessedQuestionText = clean;
@@ -1412,7 +1499,7 @@ async function startAiAudioRecording() {
     const audioConstraints = {
       audio: {
         echoCancellation: true,
-        noiseSuppression: false,
+        noiseSuppression: true,
         autoGainControl: true,
       },
       video: false,
@@ -1492,6 +1579,9 @@ function askAiQuestion() {
     return;
   }
 
+  aiQuestionFinalTranscript = '';
+  aiQuestionInterimTranscript = '';
+  lastNativeSpeechTimestamp = 0;
   candidateTranscript = '';
   lastProcessedQuestionText = '';
   aiCurrentTurn = {
@@ -1566,46 +1656,65 @@ function startCandidateListening() {
   aiRecognition.onresult = (event) => {
     showEncouragingBanner(false);
     setAiEmotion('listening', 'Listening Attentively...');
+    lastNativeSpeechTimestamp = Date.now();
+
+    let newFinalChunk = '';
     let interim = '';
-    let currentFinal = (aiManualAnswer?.value || '').trim();
+
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const text = event.results[index][0].transcript;
-      if (event.results[index].isFinal) {
-        const trimmed = text.trim();
-        if (trimmed && !currentFinal.toLowerCase().includes(trimmed.toLowerCase())) {
-          currentFinal = currentFinal ? `${currentFinal} ${trimmed}` : trimmed;
-        }
+      const res = event.results[index];
+      const text = res[0] ? res[0].transcript : '';
+      if (res.isFinal) {
+        newFinalChunk = `${newFinalChunk} ${text}`.trim();
       } else {
         interim = `${interim} ${text}`.trim();
       }
     }
-    const combined = `${currentFinal} ${interim}`.trim();
-    if (evaluateVoiceCommands(combined)) return;
+
+    if (newFinalChunk) {
+      if (aiQuestionFinalTranscript) {
+        aiQuestionFinalTranscript = `${aiQuestionFinalTranscript} ${newFinalChunk}`.trim();
+      } else {
+        aiQuestionFinalTranscript = newFinalChunk;
+      }
+      aiQuestionFinalTranscript = formatRecognizedText(aiQuestionFinalTranscript, false);
+    }
+
+    aiQuestionInterimTranscript = interim;
+
+    let combinedDisplay = aiQuestionFinalTranscript;
+    if (aiQuestionInterimTranscript) {
+      const formattedInterim = formatRecognizedText(aiQuestionInterimTranscript, false);
+      combinedDisplay = combinedDisplay ? `${combinedDisplay} ${formattedInterim}` : formattedInterim;
+    }
+
+    if (evaluateVoiceCommands(combinedDisplay)) return;
 
     if (aiManualAnswer) {
-      aiManualAnswer.value = combined;
+      aiManualAnswer.value = combinedDisplay;
       aiManualAnswer.scrollTop = aiManualAnswer.scrollHeight;
     }
     if (candidateSubtitle) {
-      candidateSubtitle.innerText = combined || 'Listening for your answer...';
+      candidateSubtitle.innerText = combinedDisplay || 'Listening for your answer...';
     }
     if (saveAiAnswerButton) {
-      saveAiAnswerButton.disabled = !combined;
+      saveAiAnswerButton.disabled = !combinedDisplay.trim();
     }
 
     clearTimeout(candidateQuestionCheckTimer);
     candidateQuestionCheckTimer = setTimeout(() => {
-      checkAndAnswerCandidateQuestion(combined);
+      checkAndAnswerCandidateQuestion(combinedDisplay);
     }, 1800);
   };
 
-  aiRecognition.onerror = () => {
+  aiRecognition.onerror = (event) => {
+    if (event?.error === 'no-speech') return;
     showEncouragingBanner(false);
     if (saveAiAnswerButton) saveAiAnswerButton.disabled = !(aiManualAnswer?.value || '').trim();
   };
 
   aiRecognition.onend = () => {
-    if (isListeningToCandidate && !aiInterviewCompleted) {
+    if (isListeningToCandidate && !aiInterviewCompleted && activeSection === 'AI Interview') {
       try {
         aiRecognition.start();
       } catch (e) {}
@@ -1657,7 +1766,11 @@ function saveCurrentAiAnswer(options = {}) {
   isListeningToCandidate = false;
   stopSpeechSupervisor();
   stopContinuousAudioTranscribe();
-  const answer = (aiManualAnswer?.value || '').trim();
+  const rawAnswer = (aiManualAnswer?.value || '').trim();
+  const answer = formatRecognizedText(rawAnswer, true);
+  if (aiManualAnswer && answer) {
+    aiManualAnswer.value = answer;
+  }
   const allowBlank = options.allowBlank !== false;
   if (!answer && !allowBlank) {
     showWarningPopup('Please answer before saving, or wait for the timer to move forward.');
@@ -1717,8 +1830,10 @@ async function finishAiInterview() {
   clearTimeout(aiAnswerTimer);
   clearInterval(aiAnswerStatusTimer);
   if (aiCurrentTurn && !aiTranscript.includes(aiCurrentTurn)) {
-    const answer = (aiManualAnswer?.value || '').trim();
+    const rawAnswer = (aiManualAnswer?.value || '').trim();
+    const answer = formatRecognizedText(rawAnswer, true);
     if (answer) {
+      if (aiManualAnswer) aiManualAnswer.value = answer;
       aiCurrentTurn.candidate_finished_at = new Date().toISOString();
       aiCurrentTurn.candidate_answer = answer;
       const started = Date.parse(aiCurrentTurn.candidate_started_at || '');
@@ -1923,7 +2038,8 @@ function startSpeech() {
     const text = event.results[0][0].transcript;
     const box = document.getElementById(activeAnswerId);
     if (!box) return;
-    box.value = `${box.value} ${text}`.trim();
+    const formatted = formatRecognizedText(text, true);
+    box.value = box.value ? `${box.value} ${formatted}` : formatted;
     updateAnsweredCount();
   };
   recognition.onerror = () => alert('Speech capture failed. Please try again or type your answer.');
@@ -1960,7 +2076,8 @@ async function submitInterview(autoSubmitReason = '') {
   clearTimeout(aiAnswerTimer);
   clearInterval(aiAnswerStatusTimer);
   if (aiCurrentTurn && !aiTranscript.includes(aiCurrentTurn)) {
-    const answer = (aiManualAnswer?.value || '').trim();
+    const rawAnswer = (aiManualAnswer?.value || '').trim();
+    const answer = formatRecognizedText(rawAnswer, true);
     aiCurrentTurn.candidate_finished_at = new Date().toISOString();
     aiCurrentTurn.candidate_answer = answer;
     aiCurrentTurn.timed_out = Boolean(autoSubmitReason);

@@ -1342,6 +1342,68 @@ except ImportError:
     sr = None
 
 
+TECHNICAL_TERMS_MAP = {
+    'sql': 'SQL', 'nosql': 'NoSQL', 'mysql': 'MySQL', 'postgresql': 'PostgreSQL', 'sqlite': 'SQLite',
+    'mongodb': 'MongoDB', 'api': 'API', 'apis': 'APIs', 'rest': 'REST', 'restful': 'RESTful',
+    'json': 'JSON', 'xml': 'XML', 'html': 'HTML', 'html5': 'HTML5', 'css': 'CSS', 'css3': 'CSS3',
+    'js': 'JS', 'javascript': 'JavaScript', 'typescript': 'TypeScript', 'python': 'Python',
+    'java': 'Java', 'c++': 'C++', 'c#': 'C#', 'php': 'PHP', 'react': 'React', 'angular': 'Angular',
+    'vue': 'Vue', 'nodejs': 'Node.js', 'django': 'Django', 'flask': 'Flask', 'git': 'Git',
+    'github': 'GitHub', 'gitlab': 'GitLab', 'jira': 'Jira', 'bugzilla': 'Bugzilla',
+    'postman': 'Postman', 'swagger': 'Swagger', 'selenium': 'Selenium', 'testng': 'TestNG',
+    'junit': 'JUnit', 'jenkins': 'Jenkins', 'docker': 'Docker', 'kubernetes': 'Kubernetes',
+    'aws': 'AWS', 'azure': 'Azure', 'gcp': 'GCP', 'linux': 'Linux', 'windows': 'Windows',
+    'agile': 'Agile', 'scrum': 'Scrum', 'qa': 'QA', 'qc': 'QC', 'sdlc': 'SDLC', 'stlc': 'STLC',
+    'uat': 'UAT', 'ci/cd': 'CI/CD', 'oop': 'OOP', 'oops': 'OOP', 'dbms': 'DBMS', 'rdbms': 'RDBMS',
+    'http': 'HTTP', 'https': 'HTTPS', 'ui': 'UI', 'ux': 'UX', 'ai': 'AI', 'ml': 'ML',
+    'wittmann': 'WITTMANN', 'battenfeld': 'BATTENFELD', 'btech': 'B.Tech', 'mtech': 'M.Tech',
+    'b.tech': 'B.Tech', 'm.tech': 'M.Tech', 'bca': 'BCA', 'mca': 'MCA', 'it': 'IT'
+}
+
+CONTRACTIONS_MAP = {
+    'im': "I'm", "i'm": "I'm", 'ive': "I've", "i've": "I've", 'ill': "I'll", "i'll": "I'll",
+    'id': "I'd", "i'd": "I'd", 'dont': "don't", 'cant': "can't", 'wont': "won't",
+    'didnt': "didn't", 'isnt': "isn't", 'arent': "aren't"
+}
+
+
+def format_interview_text(text: str, is_final: bool = True) -> str:
+    if not text:
+        return ""
+    s = str(text).strip()
+    s = re.sub(r'\s+', ' ', s)
+    s = re.sub(r'\s+([,.:;?!])', r'\1', s)
+    s = re.sub(r'([,.:;?!])([a-zA-Z0-9])', r'\1 \2', s)
+    s = re.sub(r'\b([a-zA-Z]{1,})\s+\1\b', r'\1', s, flags=re.IGNORECASE)
+
+    words = s.split(' ')
+    formatted_words = []
+    for w in words:
+        m = re.match(r'^([^\w]*)(.*?)([^\w]*)$', w)
+        if m:
+            prefix, core, suffix = m.groups()
+        else:
+            prefix, core, suffix = '', w, ''
+
+        low_core = core.lower()
+        if low_core == 'i':
+            replacement = 'I'
+        elif low_core in CONTRACTIONS_MAP:
+            replacement = CONTRACTIONS_MAP[low_core]
+        elif low_core in TECHNICAL_TERMS_MAP:
+            replacement = TECHNICAL_TERMS_MAP[low_core]
+        else:
+            replacement = core
+
+        formatted_words.append(prefix + replacement + suffix)
+
+    s = ' '.join(formatted_words)
+    s = re.sub(r'(?:^|[.!?]\s+)([a-z])', lambda m: m.group(0).upper(), s)
+    if is_final and s and s[-1].isalnum():
+        s += '.'
+    return s
+
+
 def transcribe_audio_bytes(audio_bytes: bytes) -> str:
     if not audio_bytes or not imageio_ffmpeg or not sr:
         return ""
@@ -1354,15 +1416,13 @@ def transcribe_audio_bytes(audio_bytes: bytes) -> str:
         try:
             cmd = [
                 ffmpeg_exe, "-y", "-i", in_path,
-                "-af", "dynaudnorm=f=150:g=15,volume=8.0,highpass=f=50",
+                "-af", "highpass=f=80,lowpass=f=8000,loudnorm=I=-16:TP=-1.5:LRA=11",
                 "-ac", "1", "-ar", "16000", out_path
             ]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             r = sr.Recognizer()
-            r.energy_threshold = 25
+            r.energy_threshold = 40
             r.dynamic_energy_threshold = True
-            r.dynamic_energy_adjustment_damping = 0.15
-            r.dynamic_energy_ratio = 1.2
             r.pause_threshold = 0.8
             with sr.AudioFile(out_path) as source:
                 audio_data = r.record(source)
@@ -1375,7 +1435,7 @@ def transcribe_audio_bytes(audio_bytes: bytes) -> str:
                             break
                     except Exception:
                         continue
-                return text
+                return format_interview_text(text, is_final=True) if text else ""
         except Exception:
             return ""
         finally:
@@ -1643,7 +1703,7 @@ def api_ai_interview_report():
             "ai_finished_at": str(turn.get("ai_finished_at") or "")[:80],
             "candidate_started_at": str(turn.get("candidate_started_at") or "")[:80],
             "candidate_finished_at": str(turn.get("candidate_finished_at") or "")[:80],
-            "candidate_answer": str(turn.get("candidate_answer") or "")[:6000],
+            "candidate_answer": format_interview_text(str(turn.get("candidate_answer") or ""), is_final=True)[:6000],
             "answer_seconds": float(turn.get("answer_seconds") or 0),
             "timed_out": bool(turn.get("timed_out")),
         })
